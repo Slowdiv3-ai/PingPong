@@ -57,16 +57,18 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
-        // If format isn't supported, pass through safely
+        val outputBuffer = replaceOutputBuffer(size)
+
+        // If format isn't supported, pass through safely using manual byte copy (Little Endian safe)
         if (!isFormatSupported) {
-            val outputBuffer = replaceOutputBuffer(size)
-            outputBuffer.put(inputBuffer)
+            var i = position
+            while (i < limit) {
+                outputBuffer.put(inputBuffer.get(i))
+                i++
+            }
             inputBuffer.position(limit)
             return
         }
-
-        val frameCount = size / 4
-        val outputBuffer = replaceOutputBuffer(frameCount * 4)
 
         var i = position
         val isFreqOn = PanConfig.isFreqPanEnabled
@@ -77,10 +79,15 @@ class PanEffectProcessor : BaseAudioProcessor() {
         val lfoFreq = preset.lfoRateHz * speed
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
 
-        // FIX: Use putShort() instead of .array() to avoid DirectByteBuffer crash
         while (i < limit) {
-            val sampleL = (inputBuffer.get(i).toInt() and 0xFF) or (inputBuffer.get(i + 1).toInt() shl 8)
-            val sampleR = (inputBuffer.get(i + 2).toInt() and 0xFF) or (inputBuffer.get(i + 3).toInt() shl 8)
+            // Read Little Endian 16-bit samples manually
+            val b0 = inputBuffer.get(i).toInt() and 0xFF
+            val b1 = inputBuffer.get(i + 1).toInt() and 0xFF
+            val b2 = inputBuffer.get(i + 2).toInt() and 0xFF
+            val b3 = inputBuffer.get(i + 3).toInt() and 0xFF
+
+            val sampleL = b0 or (b1 shl 8)
+            val sampleR = b2 or (b3 shl 8)
 
             val floatL = sampleL.toShort() / 32768f
             val floatR = sampleR.toShort() / 32768f
@@ -127,14 +134,16 @@ class PanEffectProcessor : BaseAudioProcessor() {
             val shortL = (outL * 32767f).toInt().toShort()
             val shortR = (outR * 32767f).toInt().toShort()
 
-            // Safe write for DirectByteBuffers
-            outputBuffer.putShort(shortL)
-            outputBuffer.putShort(shortR)
+            // Write Little Endian 16-bit samples manually
+            outputBuffer.put((shortL.toInt() and 0xFF).toByte())
+            outputBuffer.put((shortL.toInt() shr 8).toByte())
+            outputBuffer.put((shortR.toInt() and 0xFF).toByte())
+            outputBuffer.put((shortR.toInt() shr 8).toByte())
 
             i += 4
         }
 
-        lfoPhase += lfoStep * frameCount
+        lfoPhase += lfoStep * (size / 4)
         if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
 
         inputBuffer.position(limit)
