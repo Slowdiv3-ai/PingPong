@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.chaquo)
+    // REMOVED: Chaquopy plugin (no Python/yt-dlp needed for offline player)
 }
 
 val appVersionName = (project.findProperty("versionOverride") as String?) ?: "1.0"
@@ -28,52 +28,22 @@ val keystoreProps: Properties? =
 fun signingValue(propertyKey: String, envKey: String): String? =
     keystoreProps?.getProperty(propertyKey) ?: System.getenv(envKey)
 
-// Telegram API credentials from local.properties or environment variables
-val telegramApiId: String =
-    rootProject.file("local.properties").takeIf { it.exists() }
-        ?.let { Properties().apply { it.inputStream().use(::load) } }
-        ?.getProperty("TELEGRAM_API_ID")
-        ?: System.getenv("TELEGRAM_API_ID")
-        ?: "0"
-
-val telegramApiHash: String =
-    rootProject.file("local.properties").takeIf { it.exists() }
-        ?.let { Properties().apply { it.inputStream().use(::load) } }
-        ?.getProperty("TELEGRAM_API_HASH")
-        ?: System.getenv("TELEGRAM_API_HASH")
-        ?: ""
-
 base {
-    archivesName.set("zmt-$appVersionName")
+    archivesName.set("PingPong-$appVersionName")
 }
 
 android {
     namespace = "dev.abhi.zmt"
-    ndkVersion = "29.0.14206865"
-    externalNativeBuild {
-        cmake {
-            version = "4.1.2"
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 34
 
     defaultConfig {
-
         applicationId = "dev.abhi.zmt"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 34
         versionCode = appVersionCode
         versionName = appVersionName
-
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
-
-        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
-        buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+        
+        // Removed NDK abiFilters since we no longer compile C++/Python code
     }
 
     signingConfigs {
@@ -82,7 +52,7 @@ android {
             if (storePath != null && rootProject.file(storePath).exists()) {
                 storeFile = rootProject.file(storePath)
                 storePassword = signingValue("storePassword", "SIGNING_STORE_PASSWORD")
-                keyAlias = signingValue("keyAlias", "SIGNING_KEY_ALIAS") ?: "zmt"
+                keyAlias = signingValue("keyAlias", "SIGNING_KEY_ALIAS") ?: "pingpong"
                 keyPassword = signingValue("keyPassword", "SIGNING_KEY_PASSWORD")
             }
         }
@@ -90,38 +60,21 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = true
-            }
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig =
-                signingConfigs
-                    .getByName("release")
-                    .takeIf { it.storeFile != null }
+            signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-    }
-
-    packaging {
-        jniLibs.useLegacyPackaging = true
-    }
-
-    chaquopy {
-        defaultConfig {
-            version = "3.12"
-            pip {
-                install("yt-dlp>=2026.07.04")
-                install("yt-dlp-ejs>=0.8.0")
-                install("pip")
-            }
-        }
     }
 
     buildFeatures {
@@ -153,20 +106,30 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
+    
+    // Local modules
     implementation(project(":metadata"))
     implementation(project(":lyrics"))
+    
+    // Core Android
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.biometric)
+    
+    // Media3 (ExoPlayer) - The heart of PingPong
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.datasource)
     implementation(libs.media3.datasource.okhttp)
     implementation(files("libs/media3-decoder-ffmpeg-1.10.1.aar"))
+    
+    // Coroutines & DI
     implementation(libs.kotlinx.coroutines.guava)
-    implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.hilt.android)
-    implementation(libs.androidx.biometric)
-    implementation("androidx.fragment:fragment-ktx:1.8.6")
+    ksp(libs.hilt.compiler)
+    
+    // Networking (Kept for LRCLIB lyrics fetching, which is safe and lightweight)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.okhttp)
@@ -176,53 +139,11 @@ dependencies {
     implementation(libs.ktor.serialization.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.slf4j.nop)
-    implementation(libs.tdlib)
-    ksp(libs.hilt.compiler)
+    
+    // REMOVED: tdlib (Telegram), Chaquopy, and Python-specific dependencies
+    
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
 }
 
-afterEvaluate {
-    val jniLibs = file("${layout.projectDirectory}/src/main/jniLibs").also { it.mkdirs() }
-    android.buildTypes.forEach { type ->
-        val typeCapitalized = type.name.let {
-            it.first().uppercase() + it.substring(1)
-        }
-        tasks.named("assemble${typeCapitalized}").configure {
-            doFirst {
-                val cxxDir = file("${layout.buildDirectory.get()}/intermediates/cxx/${if (typeCapitalized == "Debug") "Debug" else "RelWithDebInfo"}")
-                cxxDir.walkTopDown().forEach cxx@{ f ->
-                    if (f.name != "qjs") return@cxx
-                    f.copyTo(
-                        target = jniLibs
-                            .resolve(f.parentFile.name)
-                            .also { it.mkdirs() }
-                            .resolve("libqjs.so"),
-                        overwrite = true
-                    )
-                }
-            }
-        }
-    }
-}
-
-// Ensure Chaquopy's generated proguard directory exists before minification
-// to prevent "Supplied proguard configuration does not exist" error
-tasks.matching { it.name.startsWith("minify") || it.name.startsWith("transformClassesAndResourcesWithProguard") }.configureEach {
-    dependsOn("createPythonProguardDir")
-}
-
-tasks.register("createPythonProguardDir") {
-    doLast {
-        file("${layout.buildDirectory.get()}/python").mkdirs()
-        val proguard = file("${layout.buildDirectory.get()}/python/proguard-rules.pro")
-        if (!proguard.exists()) {
-            proguard.writeText("""# Chaquopy auto-generated proguard rules
--keep class com.chaquo.python.** { *; }
--dontwarn com.chaquo.python.**
--keep class org.bouncycastle.jsse.** { *; }
--dontwarn org.bouncycastle.jsse.**
-""")
-        }
-    }
-}
+// REMOVED: All Chaquopy/QuickJS afterEvaluate blocks and Python proguard tasks
