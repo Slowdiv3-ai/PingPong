@@ -7,37 +7,28 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
 import kotlin.math.*
 
-/**
- * The core DSP engine for PingPong.
- * Intercepts PCM audio and applies Frequency and Volume based panning.
- */
 class PanEffectProcessor : BaseAudioProcessor() {
 
     companion object {
         private const val TAG = "PingPongDSP"
+        private const val DEFAULT_SAMPLE_RATE = 44100
     }
 
-    // Biquad filters for splitting frequencies
     private var lowPassLeft: Biquad? = null
     private var highPassLeft: Biquad? = null
     private var lowPassRight: Biquad? = null
     private var highPassRight: Biquad? = null
 
-    // LFO (Low Frequency Oscillator) for the "shifting" effect
     private var lfoPhase = 0.0
-    
-    // Volume Envelope Follower
     private var volumeEnvelope = 0.0
-    private var sampleRate = 44100
+    private var sampleRate = DEFAULT_SAMPLE_RATE
 
     override fun isActive(): Boolean {
         return PanConfig.isFreqPanEnabled || PanConfig.isVolPanEnabled
     }
 
-    // FIX: Media3 1.5.0+ uses AudioProcessor.AudioFormat, not Format
     @Throws(AudioProcessor.UnhandledAudioFormatException::class)
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        // Check for 16-bit PCM
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
@@ -45,12 +36,14 @@ class PanEffectProcessor : BaseAudioProcessor() {
         sampleRate = inputAudioFormat.sampleRateHz
         val channelCount = inputAudioFormat.channelCount
         
-        // We only support stereo for this specific panning effect
         if (channelCount != 2) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
 
-        // Initialize Filters based on Config
+        // Reset DSP state on format change (replaces the removed flush/reset overrides)
+        lfoPhase = 0.0
+        volumeEnvelope = 0.0
+        
         val fc = PanConfig.crossoverHz
         lowPassLeft = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toDouble())
         highPassLeft = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toDouble())
@@ -64,12 +57,12 @@ class PanEffectProcessor : BaseAudioProcessor() {
     override fun queueInput(inputBuffer: ByteBuffer) {
         val position = inputBuffer.position()
         val limit = inputBuffer.limit()
-        val frameCount = (limit - position) / 4 // 2 channels * 2 bytes per sample (16-bit)
+        val frameCount = (limit - position) / 4 
         
         if (frameCount == 0) return
 
         val outputBuffer = replaceOutputBuffer(frameCount * 4)
-        val outBytes = outputBuffer.array() // Direct access to underlying array for speed
+        val outBytes = outputBuffer.array()
 
         var i = position
         var outIndex = outputBuffer.position()
@@ -79,16 +72,13 @@ class PanEffectProcessor : BaseAudioProcessor() {
         val isFreqOn = PanConfig.isFreqPanEnabled
         val isVolOn = PanConfig.isVolPanEnabled
 
-        // OPTIMIZATION: Calculate LFO step once per buffer, not per sample!
         val lfoFreq = preset.lfoRateHz * speed
         val lfoStep = 2.0 * Math.PI * (lfoFreq / sampleRate)
 
         while (i < limit) {
-            // Read 16-bit samples (Little Endian)
             val sampleL = (inputBuffer.get(i).toInt() and 0xFF) or (inputBuffer.get(i + 1).toInt() shl 8)
             val sampleR = (inputBuffer.get(i + 2).toInt() and 0xFF) or (inputBuffer.get(i + 3).toInt() shl 8)
             
-            // Convert to Float (-1.0 to 1.0)
             val floatL = sampleL.toShort() / 32768f
             val floatR = sampleR.toShort() / 32768f
 
@@ -96,33 +86,25 @@ class PanEffectProcessor : BaseAudioProcessor() {
             var outR = floatR
 
             if (isFreqOn) {
-                // 1. Split frequencies
                 val loL = lowPassLeft?.process(floatL.toDouble()) ?: floatL.toDouble()
                 val hiL = highPassLeft?.process(floatL.toDouble()) ?: 0.0
                 val loR = lowPassRight?.process(floatR.toDouble()) ?: floatR.toDouble()
                 val hiR = highPassRight?.process(floatR.toDouble()) ?: 0.0
 
-                // 2. Calculate LFO (Sine wave 0.0 to 1.0)
                 val lfoVal = (sin(lfoPhase) + 1.0) / 2.0 
-                
-                // 3. Apply Panning (Constant Power)
                 val angle = lfoVal * (Math.PI / 2.0) 
                 val cosA = cos(angle).toFloat()
                 val sinA = sin(angle).toFloat()
-
                 val depth = preset.depth
                 
-                // Target: Low freqs go to one side, High to the other, swapping over time
                 val targetL = (loL * sinA + hiL * cosA).toFloat()
                 val targetR = (loR * cosA + hiR * sinA).toFloat()
 
-                // Blend original with effect based on depth
                 outL = floatL * (1f - depth) + targetL * depth
                 outR = floatR * (1f - depth) + targetR * depth
             }
 
             if (isVolOn) {
-                // Simple Volume Panning: As volume gets louder, push the image wider
                 val currentVol = abs((outL + outR) / 2f)
                 volumeEnvelope = if (currentVol > volumeEnvelope) {
                     volumeEnvelope + (currentVol - volumeEnvelope) * preset.attack
@@ -135,15 +117,12 @@ class PanEffectProcessor : BaseAudioProcessor() {
                 outR *= widthBoost
             }
 
-            // Clip to prevent distortion (Hard clip at +/- 1.0)
             outL = outL.coerceIn(-1f, 1f)
             outR = outR.coerceIn(-1f, 1f)
 
-            // Convert back to 16-bit
             val shortL = (outL * 32767f).toInt().toShort()
             val shortR = (outR * 32767f).toInt().toShort()
 
-            // Write to output buffer (Little Endian)
             outBytes[outIndex++] = (shortL.toInt() and 0xFF).toByte()
             outBytes[outIndex++] = (shortL.toInt() shr 8).toByte()
             outBytes[outIndex++] = (shortR.toInt() and 0xFF).toByte()
@@ -152,7 +131,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
             i += 4
         }
 
-        // Advance LFO phase for the entire buffer at once (much more efficient)
         lfoPhase += lfoStep * frameCount
         if (lfoPhase > 2.0 * Math.PI) lfoPhase -= 2.0 * Math.PI
 
@@ -160,22 +138,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
         outputBuffer.position(outIndex)
     }
 
-    override fun flush() {
-        super.flush()
-        lfoPhase = 0.0
-        volumeEnvelope = 0.0
-        lowPassLeft?.reset()
-        highPassLeft?.reset()
-        lowPassRight?.reset()
-        highPassRight?.reset()
-    }
-
-    override fun reset() {
-        super.reset()
-        flush()
-    }
-
-    // --- Inner Class: Biquad Filter (The Math) ---
+    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Double, val sampleRateHz: Double, val q: Double = 0.7071) {
         enum class Type { LOWPASS, HIGHPASS }
 
