@@ -2,7 +2,6 @@ package dev.abhi.zmt.audio
 
 import android.util.Log
 import androidx.media3.common.C
-import androidx.media3.common.Format
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
@@ -35,18 +34,20 @@ class PanEffectProcessor : BaseAudioProcessor() {
         return PanConfig.isFreqPanEnabled || PanConfig.isVolPanEnabled
     }
 
-    override fun onConfigure(inputFormat: Format): Format {
-        // Media3 1.5.0+ uses pcmEncoding instead of encoding
-        if (inputFormat.pcmEncoding != C.ENCODING_PCM_16BIT) {
-            // ConfigurationException is now nested inside AudioProcessor
-            throw AudioProcessor.ConfigurationException("Unsupported encoding: ${inputFormat.pcmEncoding}")
+    // FIX: Media3 1.5.0+ uses AudioProcessor.AudioFormat, not Format
+    @Throws(AudioProcessor.UnhandledAudioFormatException::class)
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        // Check for 16-bit PCM
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
+            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
         
-        sampleRate = inputFormat.sampleRate
-        val channelCount = inputFormat.channelCount
+        sampleRate = inputAudioFormat.sampleRateHz
+        val channelCount = inputAudioFormat.channelCount
         
+        // We only support stereo for this specific panning effect
         if (channelCount != 2) {
-            throw AudioProcessor.ConfigurationException("Only Stereo (2 channels) supported for PingPong effect.")
+            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
 
         // Initialize Filters based on Config
@@ -57,7 +58,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
         highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toDouble())
 
         Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
-        return inputFormat
+        return inputAudioFormat
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
