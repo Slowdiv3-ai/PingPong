@@ -34,7 +34,7 @@ class RawAudioPlayer {
         playbackThread = Thread {
             val extractor = MediaExtractor()
             try {
-                // Use the modern Context-based data source to avoid file path issues
+                Log.d(TAG, "Starting playback for URI: $uri")
                 extractor.setDataSource(context, uri, null)
                 
                 var audioTrackIndex = -1
@@ -50,7 +50,7 @@ class RawAudioPlayer {
                 }
 
                 if (audioTrackIndex == -1 || format == null) {
-                    Log.e(TAG, "No audio track found")
+                    Log.e(TAG, "No audio track found in file")
                     return@Thread
                 }
 
@@ -59,11 +59,12 @@ class RawAudioPlayer {
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                Log.d(TAG, "Decoding: $mime, SR: $actualSampleRate, Channels: $channelCount")
+                Log.d(TAG, "Found audio track: $mime, SampleRate: $actualSampleRate, Channels: $channelCount")
 
                 val codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
                 codec.start()
+                Log.d(TAG, "MediaCodec started")
 
                 val minBufferSize = AudioTrack.getMinBufferSize(
                     actualSampleRate,
@@ -90,26 +91,28 @@ class RawAudioPlayer {
                     .build()
 
                 audioTrack?.play()
+                Log.d(TAG, "AudioTrack created and playing. Min buffer: $minBufferSize")
 
                 val bufferInfo = MediaCodec.BufferInfo()
-                val inputBuffers = codec.inputBuffers
-                val outputBuffers = codec.outputBuffers
                 var sawInputEOS = false
                 var sawOutputEOS = false
 
                 lfoPhase = 0.0f
                 val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / actualSampleRate)
+                var framesProcessed = 0
 
                 while (isPlaying && !sawOutputEOS) {
+                    // 1. Feed data to decoder
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
-                            val inputBuffer = inputBuffers[inputBufferIndex]
-                            inputBuffer.clear()
-                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                            val inputBuffer = codec.getInputBuffer(inputBufferIndex)
+                            inputBuffer?.clear()
+                            val sampleSize = extractor.readSampleData(inputBuffer!!, 0)
                             if (sampleSize < 0) {
                                 codec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 sawInputEOS = true
+                                Log.d(TAG, "Reached end of input stream")
                             } else {
                                 codec.queueInputBuffer(inputBufferIndex, 0, sampleSize, extractor.sampleTime, 0)
                                 extractor.advance()
@@ -117,26 +120,41 @@ class RawAudioPlayer {
                         }
                     }
 
+                    // 2. Get decoded data
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
-                        val outputBuffer = outputBuffers[outputBufferIndex]
+                        val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
                         
-                        if (bufferInfo.size > 0 && channelCount == 2) {
+                        if (bufferInfo.size > 0 && channelCount == 2 && outputBuffer != null) {
+                            // Apply our Volume Pan math
                             applyVolumePan(outputBuffer, bufferInfo.size, lfoStep)
+                            
+                            // CRITICAL FIX: Explicitly write the modified bytes to the AudioTrack!
+                            val bytesWritten = audioTrack?.write(outputBuffer, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            if (bytesWritten != null && bytesWritten > 0) {
+                                framesProcessed++
+                                if (framesProcessed % 50 == 0) {
+                                    Log.d(TAG, "Successfully wrote $bytesWritten bytes to AudioTrack")
+                                }
+                            }
                         }
 
-                        codec.releaseOutputBuffer(outputBufferIndex, true)
+                        // Release the buffer back to the codec (false = we handled the rendering manually)
+                        codec.releaseOutputBuffer(outputBufferIndex, false)
 
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             sawOutputEOS = true
+                            Log.d(TAG, "Reached end of output stream")
                         }
                     } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        Log.d(TAG, "Output format changed")
+                        Log.d(TAG, "Output format changed: ${codec.outputFormat}")
                     }
                 }
 
+                Log.d(TAG, "Playback loop finished")
+
             } catch (e: Exception) {
-                Log.e(TAG, "Playback error", e)
+                Log.e(TAG, "Playback error occurred", e)
             } finally {
                 stop()
             }
@@ -187,5 +205,6 @@ class RawAudioPlayer {
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
+        Log.d(TAG, "RawAudioPlayer stopped and released")
     }
 }
