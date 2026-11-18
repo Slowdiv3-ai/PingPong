@@ -3,9 +3,9 @@ package dev.abhi.zmt.audio
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.exoplayer.audio.AudioProcessor
 import androidx.media3.exoplayer.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.*
 
 /**
@@ -29,23 +29,24 @@ class PanEffectProcessor : BaseAudioProcessor() {
     
     // Volume Envelope Follower
     private var volumeEnvelope = 0.0
+    private var sampleRate = 44100
 
     override fun isActive(): Boolean {
         return PanConfig.isFreqPanEnabled || PanConfig.isVolPanEnabled
     }
 
-    override fun onConfigure(inputAudioFormat: Format): Format {
-        // We only support PCM 16-bit for this custom DSP
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
-            throw ConfigurationException("Unsupported encoding: ${inputAudioFormat.encoding}")
+    override fun onConfigure(inputFormat: Format): Format {
+        // FIX 1: Media3 uses pcmEncoding, not encoding
+        if (inputFormat.pcmEncoding != C.ENCODING_PCM_16BIT) {
+            // FIX 2: ConfigurationException is nested inside AudioProcessor
+            throw AudioProcessor.ConfigurationException("Unsupported encoding: ${inputFormat.pcmEncoding}")
         }
         
-        val sampleRate = inputAudioFormat.sampleRate
-        val channelCount = inputAudioFormat.channelCount
+        sampleRate = inputFormat.sampleRate
+        val channelCount = inputFormat.channelCount
         
         if (channelCount != 2) {
-             // For mono, we would need to duplicate channels, but let's stick to stereo for now
-             throw ConfigurationException("Only Stereo (2 channels) supported for PingPong effect.")
+            throw AudioProcessor.ConfigurationException("Only Stereo (2 channels) supported for PingPong effect.")
         }
 
         // Initialize Filters based on Config
@@ -56,7 +57,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
         highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toDouble())
 
         Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
-        return inputAudioFormat
+        return inputFormat
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -69,7 +70,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
         val outputBuffer = replaceOutputBuffer(frameCount * 4)
         val outBytes = outputBuffer.array() // Direct access to underlying array for speed
 
-        // Process samples
         var i = position
         var outIndex = outputBuffer.position()
         
@@ -77,6 +77,10 @@ class PanEffectProcessor : BaseAudioProcessor() {
         val speed = PanConfig.speedMultiplier
         val isFreqOn = PanConfig.isFreqPanEnabled
         val isVolOn = PanConfig.isVolPanEnabled
+
+        // OPTIMIZATION: Calculate LFO step once per buffer, not per sample!
+        val lfoFreq = preset.lfoRateHz * speed
+        val lfoStep = 2.0 * Math.PI * (lfoFreq / sampleRate)
 
         while (i < limit) {
             // Read 16-bit samples (Little Endian)
@@ -98,17 +102,13 @@ class PanEffectProcessor : BaseAudioProcessor() {
                 val hiR = highPassRight?.process(floatR.toDouble()) ?: 0.0
 
                 // 2. Calculate LFO (Sine wave 0.0 to 1.0)
-                // This creates the "Ping Pong" shift
                 val lfoVal = (sin(lfoPhase) + 1.0) / 2.0 
                 
                 // 3. Apply Panning (Constant Power)
-                // When lfoVal is 0: Low is Right, High is Left
-                // When lfoVal is 1: Low is Left, High is Right
                 val angle = lfoVal * (Math.PI / 2.0) 
                 val cosA = cos(angle).toFloat()
                 val sinA = sin(angle).toFloat()
 
-                // Mix based on depth
                 val depth = preset.depth
                 
                 // Target: Low freqs go to one side, High to the other, swapping over time
@@ -121,17 +121,14 @@ class PanEffectProcessor : BaseAudioProcessor() {
             }
 
             if (isVolOn) {
-                // Simple Volume Panning: 
-                // As volume gets louder, push the image wider (or shift it)
+                // Simple Volume Panning: As volume gets louder, push the image wider
                 val currentVol = abs((outL + outR) / 2f)
-                // Smooth the envelope
                 volumeEnvelope = if (currentVol > volumeEnvelope) {
                     volumeEnvelope + (currentVol - volumeEnvelope) * preset.attack
                 } else {
                     volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
                 }
                 
-                // Use envelope to modulate width (simple stereo widening)
                 val widthBoost = 1.0f + (volumeEnvelope * preset.depth)
                 outL *= widthBoost
                 outR *= widthBoost
@@ -154,21 +151,8 @@ class PanEffectProcessor : BaseAudioProcessor() {
             i += 4
         }
 
-        // Advance LFO phase
-        // Rate = preset.lfoRateHz * speedMultiplier
-        // We add (2 * PI * freq / sampleRate) per sample
-        val lfoFreq = preset.lfoRateHz * speed
-        // Note: We are inside a loop of samples, but we only need to advance phase once per frame? 
-        // No, LFO is continuous time. We should advance it based on time elapsed.
-        // Simplification: Advance phase by a tiny step per sample.
-        // Step = 2 * PI * (lfoFreq / sampleRate)
-        // We don't have sampleRate here easily, but we can approximate or pass it in configure.
-        // For now, let's use a fixed step that sounds good at 44.1kHz, or better:
-        // Actually, BaseAudioProcessor doesn't give sampleRate in queueInput easily. 
-        // Let's assume 44100 for the step calculation or store it in configure.
-        // (I will add sampleRate storage in the final version, but for now:)
-        val sampleRate = 44100.0 // Fallback
-        lfoPhase += 2.0 * Math.PI * (lfoFreq / sampleRate)
+        // Advance LFO phase for the entire buffer at once (much more efficient)
+        lfoPhase += lfoStep * frameCount
         if (lfoPhase > 2.0 * Math.PI) lfoPhase -= 2.0 * Math.PI
 
         inputBuffer.position(limit)
