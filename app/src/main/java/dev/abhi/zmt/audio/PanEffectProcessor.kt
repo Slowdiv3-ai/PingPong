@@ -23,8 +23,10 @@ class PanEffectProcessor : BaseAudioProcessor() {
     private var volumeEnvelope = 0.0f
     private var sampleRate = DEFAULT_SAMPLE_RATE
 
+    // FIX 1: Always return true so Media3 keeps this processor in the audio chain.
+    // We handle the actual on/off state inside the queueInput loop below.
     override fun isActive(): Boolean {
-        return PanConfig.isFreqPanEnabled || PanConfig.isVolPanEnabled
+        return true
     }
 
     @Throws(AudioProcessor.UnhandledAudioFormatException::class)
@@ -33,7 +35,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
 
-        // FIX 1: Property is 'sampleRate', not 'sampleRateHz'
         sampleRate = inputAudioFormat.sampleRate
         val channelCount = inputAudioFormat.channelCount
 
@@ -86,37 +87,39 @@ class PanEffectProcessor : BaseAudioProcessor() {
             var outL = floatL
             var outR = floatR
 
-            if (isFreqOn) {
-                // FIX 2: All Biquad math is now strictly Float, eliminating Double/Float assignment errors
-                val loL = lowPassLeft?.process(floatL) ?: floatL
-                val hiL = highPassLeft?.process(floatL) ?: 0.0f
-                val loR = lowPassRight?.process(floatR) ?: floatR
-                val hiR = highPassRight?.process(floatR) ?: 0.0f
+            // FIX 2: Only do the heavy DSP math if at least one effect is turned on
+            if (isFreqOn || isVolOn) {
+                if (isFreqOn) {
+                    val loL = lowPassLeft?.process(floatL) ?: floatL
+                    val hiL = highPassLeft?.process(floatL) ?: 0.0f
+                    val loR = lowPassRight?.process(floatR) ?: floatR
+                    val hiR = highPassRight?.process(floatR) ?: 0.0f
 
-                val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
-                val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
-                val cosA = cos(angle)
-                val sinA = sin(angle)
-                val depth = preset.depth
+                    val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
+                    val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
+                    val cosA = cos(angle)
+                    val sinA = sin(angle)
+                    val depth = preset.depth
 
-                val targetL = (loL * sinA + hiL * cosA)
-                val targetR = (loR * cosA + hiR * sinA)
+                    val targetL = (loL * sinA + hiL * cosA)
+                    val targetR = (loR * cosA + hiR * sinA)
 
-                outL = floatL * (1f - depth) + targetL * depth
-                outR = floatR * (1f - depth) + targetR * depth
-            }
-
-            if (isVolOn) {
-                val currentVol = abs((outL + outR) / 2f)
-                volumeEnvelope = if (currentVol > volumeEnvelope) {
-                    volumeEnvelope + (currentVol - volumeEnvelope) * preset.attack
-                } else {
-                    volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
+                    outL = floatL * (1f - depth) + targetL * depth
+                    outR = floatR * (1f - depth) + targetR * depth
                 }
 
-                val widthBoost = 1.0f + (volumeEnvelope * preset.depth)
-                outL *= widthBoost
-                outR *= widthBoost
+                if (isVolOn) {
+                    val currentVol = abs((outL + outR) / 2f)
+                    volumeEnvelope = if (currentVol > volumeEnvelope) {
+                        volumeEnvelope + (currentVol - volumeEnvelope) * preset.attack
+                    } else {
+                        volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
+                    }
+
+                    val widthBoost = 1.0f + (volumeEnvelope * preset.depth)
+                    outL *= widthBoost
+                    outR *= widthBoost
+                }
             }
 
             outL = outL.coerceIn(-1f, 1f)
