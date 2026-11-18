@@ -18,7 +18,7 @@ private val panProcessor = PanEffectProcessor()
         return DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(false)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            .setAudioProcessors(arrayOf(panProcessor))
+            .setAudioProcessors(arrayOf())
             .build()
     }
 }
