@@ -22,17 +22,13 @@ class PanEffectProcessor : BaseAudioProcessor() {
     private var lfoPhase = 0.0f
     private var volumeEnvelope = 0.0f
     private var sampleRate = DEFAULT_SAMPLE_RATE
-    
-    // CRITICAL: Track if the current audio format is supported
     private var isFormatSupported = false
 
-    // Always return true so Media3 keeps this processor in the audio chain.
     override fun isActive(): Boolean {
         return true
     }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        // Check if it's standard 16-bit stereo. If not, we will just pass it through unchanged.
         isFormatSupported = (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount == 2)
         
         if (isFormatSupported) {
@@ -49,10 +45,8 @@ class PanEffectProcessor : BaseAudioProcessor() {
             
             Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
         } else {
-            Log.w(TAG, "Format not 16-bit stereo (encoding: ${inputAudioFormat.encoding}, channels: ${inputAudioFormat.channelCount}). Passing through unchanged.")
+            Log.w(TAG, "Format not supported. Passing through.")
         }
-        
-        // Never throw an exception here, or it will break the audio chain and cause silence!
         return inputAudioFormat
     }
 
@@ -63,7 +57,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
-        // If the format isn't supported, just pass the buffer through unchanged
+        // If format isn't supported, pass through safely
         if (!isFormatSupported) {
             val outputBuffer = replaceOutputBuffer(size)
             outputBuffer.put(inputBuffer)
@@ -71,21 +65,19 @@ class PanEffectProcessor : BaseAudioProcessor() {
             return
         }
 
-        val frameCount = size / 4 // 2 channels * 2 bytes per sample (16-bit)
-        val outputBuffer = replaceOutputBuffer(size)
-        val outBytes = outputBuffer.array()
+        val frameCount = size / 4
+        val outputBuffer = replaceOutputBuffer(frameCount * 4)
 
         var i = position
-        var outIndex = outputBuffer.position()
-
-        val preset = PanConfig.currentPreset
-        val speed = PanConfig.speedMultiplier
         val isFreqOn = PanConfig.isFreqPanEnabled
         val isVolOn = PanConfig.isVolPanEnabled
+        val preset = PanConfig.currentPreset
+        val speed = PanConfig.speedMultiplier
 
         val lfoFreq = preset.lfoRateHz * speed
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
 
+        // FIX: Use putShort() instead of .array() to avoid DirectByteBuffer crash
         while (i < limit) {
             val sampleL = (inputBuffer.get(i).toInt() and 0xFF) or (inputBuffer.get(i + 1).toInt() shl 8)
             val sampleR = (inputBuffer.get(i + 2).toInt() and 0xFF) or (inputBuffer.get(i + 3).toInt() shl 8)
@@ -96,7 +88,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
             var outL = floatL
             var outR = floatR
 
-            // Only do the heavy DSP math if at least one effect is turned on
             if (isFreqOn || isVolOn) {
                 if (isFreqOn) {
                     val loL = lowPassLeft?.process(floatL) ?: floatL
@@ -124,7 +115,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
                     } else {
                         volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
                     }
-
                     val widthBoost = 1.0f + (volumeEnvelope * preset.depth)
                     outL *= widthBoost
                     outR *= widthBoost
@@ -137,10 +127,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
             val shortL = (outL * 32767f).toInt().toShort()
             val shortR = (outR * 32767f).toInt().toShort()
 
-            outBytes[outIndex++] = (shortL.toInt() and 0xFF).toByte()
-            outBytes[outIndex++] = (shortL.toInt() shr 8).toByte()
-            outBytes[outIndex++] = (shortR.toInt() and 0xFF).toByte()
-            outBytes[outIndex++] = (shortR.toInt() shr 8).toByte()
+            // Safe write for DirectByteBuffers
+            outputBuffer.putShort(shortL)
+            outputBuffer.putShort(shortR)
 
             i += 4
         }
@@ -149,10 +138,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
         if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
 
         inputBuffer.position(limit)
-        outputBuffer.position(outIndex)
     }
 
-    // --- Inner Class: Biquad Filter (Strictly Float) ---
+    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
 
@@ -194,10 +182,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
             y2 = y1
             y1 = y
             return y
-        }
-
-        fun reset() {
-            x1 = 0.0f; x2 = 0.0f; y1 = 0.0f; y2 = 0.0f
         }
     }
 }
