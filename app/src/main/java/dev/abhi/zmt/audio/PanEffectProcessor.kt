@@ -59,13 +59,8 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         val outputBuffer = replaceOutputBuffer(size)
 
-        // If format isn't supported, pass through safely using manual byte copy (Little Endian safe)
         if (!isFormatSupported) {
-            var i = position
-            while (i < limit) {
-                outputBuffer.put(inputBuffer.get(i))
-                i++
-            }
+            outputBuffer.put(inputBuffer)
             inputBuffer.position(limit)
             return
         }
@@ -76,11 +71,17 @@ class PanEffectProcessor : BaseAudioProcessor() {
         val preset = PanConfig.currentPreset
         val speed = PanConfig.speedMultiplier
 
+        // 🚀 MASSIVE OPTIMIZATION: Calculate trig functions ONCE per buffer, not per sample!
         val lfoFreq = preset.lfoRateHz * speed
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
+        
+        val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
+        val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
+        val cosA = cos(angle)
+        val sinA = sin(angle)
+        val depth = preset.depth
 
         while (i < limit) {
-            // Read Little Endian 16-bit samples manually
             val b0 = inputBuffer.get(i).toInt() and 0xFF
             val b1 = inputBuffer.get(i + 1).toInt() and 0xFF
             val b2 = inputBuffer.get(i + 2).toInt() and 0xFF
@@ -102,12 +103,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
                     val loR = lowPassRight?.process(floatR) ?: floatR
                     val hiR = highPassRight?.process(floatR) ?: 0.0f
 
-                    val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
-                    val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
-                    val cosA = cos(angle)
-                    val sinA = sin(angle)
-                    val depth = preset.depth
-
+                    // Uses the pre-calculated cosA and sinA (no per-sample trig calls!)
                     val targetL = (loL * sinA + hiL * cosA)
                     val targetR = (loR * cosA + hiR * sinA)
 
@@ -122,7 +118,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
                     } else {
                         volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
                     }
-                    val widthBoost = 1.0f + (volumeEnvelope * preset.depth)
+                    val widthBoost = 1.0f + (volumeEnvelope * depth)
                     outL *= widthBoost
                     outR *= widthBoost
                 }
@@ -134,7 +130,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
             val shortL = (outL * 32767f).toInt().toShort()
             val shortR = (outR * 32767f).toInt().toShort()
 
-            // Write Little Endian 16-bit samples manually
             outputBuffer.put((shortL.toInt() and 0xFF).toByte())
             outputBuffer.put((shortL.toInt() shr 8).toByte())
             outputBuffer.put((shortR.toInt() and 0xFF).toByte())
@@ -149,7 +144,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
         inputBuffer.position(limit)
     }
 
-    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
 
