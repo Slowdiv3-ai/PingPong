@@ -1,11 +1,13 @@
 package dev.abhi.zmt.audio
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.net.Uri
 import android.util.Log
 import java.nio.ByteBuffer
 import kotlin.math.*
@@ -22,19 +24,19 @@ class RawAudioPlayer {
 
     // Volume Pan Parameters
     private var lfoPhase = 0.0f
-    private val lfoFreq = 0.5f // 0.5 Hz cycle (swaps left/right every 2 seconds)
-    private val depth = 0.8f   // How extreme the pan is
+    private val lfoFreq = 0.5f // Swaps left/right every 2 seconds
+    private val depth = 0.8f   // Pan intensity
 
-    fun playFile(filePath: String, sampleRate: Int = 44100) {
+    fun playUri(context: Context, uri: Uri) {
         if (isPlaying) stop()
         isPlaying = true
 
         playbackThread = Thread {
             val extractor = MediaExtractor()
             try {
-                extractor.setDataSource(filePath)
+                // Use the modern Context-based data source to avoid file path issues
+                extractor.setDataSource(context, uri, null)
                 
-                // Find the audio track
                 var audioTrackIndex = -1
                 var format: MediaFormat? = null
                 for (i in 0 until extractor.trackCount) {
@@ -59,12 +61,10 @@ class RawAudioPlayer {
 
                 Log.d(TAG, "Decoding: $mime, SR: $actualSampleRate, Channels: $channelCount")
 
-                // Create the decoder
                 val codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
                 codec.start()
 
-                // Create the raw AudioTrack (Stereo, 16-bit PCM)
                 val minBufferSize = AudioTrack.getMinBufferSize(
                     actualSampleRate,
                     AudioFormat.CHANNEL_OUT_STEREO,
@@ -85,7 +85,7 @@ class RawAudioPlayer {
                             .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                             .build()
                     )
-                    .setBufferSizeInBytes(minBufferSize * 4) // Larger buffer for smooth playback
+                    .setBufferSizeInBytes(minBufferSize * 4)
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
 
@@ -101,7 +101,6 @@ class RawAudioPlayer {
                 val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / actualSampleRate)
 
                 while (isPlaying && !sawOutputEOS) {
-                    // 1. Feed data to decoder
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -118,16 +117,15 @@ class RawAudioPlayer {
                         }
                     }
 
-                    // 2. Get decoded data and apply Volume Pan
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = outputBuffers[outputBufferIndex]
                         
                         if (bufferInfo.size > 0 && channelCount == 2) {
-                            applyVolumePan(outputBuffer, bufferInfo.size, actualSampleRate, lfoStep)
+                            applyVolumePan(outputBuffer, bufferInfo.size, lfoStep)
                         }
 
-                        codec.releaseOutputBuffer(outputBufferIndex, true) // 'true' renders to AudioTrack
+                        codec.releaseOutputBuffer(outputBufferIndex, true)
 
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             sawOutputEOS = true
@@ -146,12 +144,11 @@ class RawAudioPlayer {
         playbackThread?.start()
     }
 
-    private fun applyVolumePan(buffer: ByteBuffer, size: Int, sampleRate: Int, lfoStep: Float) {
+    private fun applyVolumePan(buffer: ByteBuffer, size: Int, lfoStep: Float) {
         val limit = buffer.position() + size
         var i = buffer.position()
 
         while (i < limit) {
-            // Read 16-bit Little Endian Stereo
             val b0 = buffer.get(i).toInt() and 0xFF
             val b1 = buffer.get(i + 1).toInt() and 0xFF
             val sampleL = (b0 or (b1 shl 8)).toShort() / 32768f
@@ -160,7 +157,6 @@ class RawAudioPlayer {
             val b3 = buffer.get(i + 3).toInt() and 0xFF
             val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
-            // Calculate Panning (Constant Power)
             val pan = (sin(lfoPhase) + 1.0f) / 2.0f
             val angle = pan * (Math.PI.toFloat() / 2.0f)
             val leftGain = cos(angle)
@@ -169,14 +165,13 @@ class RawAudioPlayer {
             var outL = (sampleL * leftGain * depth).coerceIn(-1f, 1f)
             var outR = (sampleR * rightGain * depth).coerceIn(-1f, 1f)
 
-            // Write back 16-bit Little Endian
             val shortL = (outL * 32767f).toInt().toShort()
             buffer.put(i, (shortL.toInt() and 0xFF).toByte())
             buffer.put(i + 1, (shortL.toInt() shr 8).toByte())
 
             val shortR = (outR * 32767f).toInt().toShort()
             buffer.put(i + 2, (shortR.toInt() and 0xFF).toByte())
-            buffer.put(i + 3, (shortR.toInt() shr 8).toByte)
+            buffer.put(i + 3, (shortR.toInt() shr 8).toByte())
 
             i += 4
             lfoPhase += lfoStep
