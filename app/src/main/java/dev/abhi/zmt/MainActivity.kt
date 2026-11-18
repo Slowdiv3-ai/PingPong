@@ -3,8 +3,8 @@ package dev.abhi.zmt
 import android.content.Intent
 import android.graphics.Color
 import android.media.audiofx.AudioEffect
+import android.net.Uri
 import android.os.Bundle
-import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -12,31 +12,36 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import dev.abhi.zmt.ui.theme.TuiDim
-import androidx.compose.runtime.mutableStateOf
 import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import dev.abhi.zmt.presentation.settings.FingerprintAuthManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import dagger.hilt.android.AndroidEntryPoint
+import dev.abhi.zmt.audio.RawAudioPlayer // <-- ADDED IMPORT
 import dev.abhi.zmt.presentation.main.DmtScreen
 import dev.abhi.zmt.presentation.main.SetupScreen
 import dev.abhi.zmt.presentation.player.DmtAction
 import dev.abhi.zmt.presentation.player.PlayerEffect
 import dev.abhi.zmt.presentation.player.PlayerViewModel
+import dev.abhi.zmt.presentation.settings.FingerprintAuthManager
 import dev.abhi.zmt.ui.theme.DMTTheme
 import dev.abhi.zmt.ui.theme.TuiAccent
+import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiThemeProvider
 import dev.abhi.zmt.ui.theme.toColor
 
@@ -45,6 +50,15 @@ class MainActivity : FragmentActivity() {
 
     private val playerViewModel: PlayerViewModel by viewModels()
     private val fingerprintAuth = FingerprintAuthManager()
+    
+    // --- TEMPORARY TEST CODE START ---
+    private val rawPlayer = RawAudioPlayer()
+    private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            rawPlayer.playUri(this, it)
+        }
+    }
+    // --- TEMPORARY TEST CODE END ---
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,83 +73,96 @@ class MainActivity : FragmentActivity() {
             }
             DMTTheme(theme = state.settings.theme) {
                 TuiThemeProvider(theme = state.settings.theme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    val writeLauncher = rememberLauncherForActivityResult(
-                        ActivityResultContracts.StartIntentSenderForResult(),
-                    ) { result ->
-                        playerViewModel.onIntent(
-                            DmtAction.EmbedLyrics(result.resultCode == RESULT_OK),
-                        )
-                    }
-
-                    LaunchedEffect(Unit) {
-                        playerViewModel.effects.collect { effect ->
-                            when (effect) {
-                                is PlayerEffect.OpenEqualizer -> openEqualizer(
-                                    effect.audioSessionId,
-                                )
-
-                                is PlayerEffect.RequestWrite -> writeLauncher.launch(
-                                    IntentSenderRequest.Builder(effect.intentSender).build(),
-                                )
-                            }
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        val writeLauncher = rememberLauncherForActivityResult(
+                            ActivityResultContracts.StartIntentSenderForResult(),
+                        ) { result ->
+                            playerViewModel.onIntent(
+                                DmtAction.EmbedLyrics(result.resultCode == RESULT_OK),
+                            )
                         }
-                    }
 
-                    val authenticated = remember { mutableStateOf(false) }
-                    LaunchedEffect(state.settings.fingerprintLock) {
-                        if (state.settings.fingerprintLock && !authenticated.value) {
-                            if (fingerprintAuth.canAuthenticate(this@MainActivity)) {
-                                fingerprintAuth.authenticate(
-                                    this@MainActivity,
-                                    onSuccess = { authenticated.value = true },
-                                    onError = { },
-                                )
-                            } else {
-                                authenticated.value = true
-                            }
-                        }
-                    }
+                        LaunchedEffect(Unit) {
+                            playerViewModel.effects.collect { effect ->
+                                when (effect) {
+                                    is PlayerEffect.OpenEqualizer -> openEqualizer(
+                                        effect.audioSessionId,
+                                    )
 
-                    when {
-                        !state.settingsLoaded -> Unit
-                        !state.settings.setupDone -> SetupScreen(
-                            state = state,
-                            dispatch = playerViewModel::onIntent,
-                        )
-
-                        state.settings.fingerprintLock && !authenticated.value -> {
-                            Surface(
-                                modifier = Modifier.fillMaxSize(),
-                                color = MaterialTheme.colorScheme.background,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "tap to unlock",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = TuiDim,
-                                        modifier = Modifier.clickable {
-                                            fingerprintAuth.authenticate(
-                                                this@MainActivity,
-                                                onSuccess = { authenticated.value = true },
-                                                onError = { },
-                                            )
-                                        },
+                                    is PlayerEffect.RequestWrite -> writeLauncher.launch(
+                                        IntentSenderRequest.Builder(effect.intentSender).build(),
                                     )
                                 }
                             }
                         }
 
-                        else -> DmtScreen(
-                            state = state,
-                            dispatch = playerViewModel::onIntent,
-                            art = playerViewModel::homeArt,
-                        )
+                        val authenticated = remember { mutableStateOf(false) }
+                        LaunchedEffect(state.settings.fingerprintLock) {
+                            if (state.settings.fingerprintLock && !authenticated.value) {
+                                if (fingerprintAuth.canAuthenticate(this@MainActivity)) {
+                                    fingerprintAuth.authenticate(
+                                        this@MainActivity,
+                                        onSuccess = { authenticated.value = true },
+                                        onError = { },
+                                    )
+                                } else {
+                                    authenticated.value = true
+                                }
+                            }
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // --- YOUR ORIGINAL UI LOGIC ---
+                            when {
+                                !state.settingsLoaded -> Unit
+                                !state.settings.setupDone -> SetupScreen(
+                                    state = state,
+                                    dispatch = playerViewModel::onIntent,
+                                )
+
+                                state.settings.fingerprintLock && !authenticated.value -> {
+                                    Surface(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color = MaterialTheme.colorScheme.background,
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "tap to unlock",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = TuiDim,
+                                                modifier = Modifier.clickable {
+                                                    fingerprintAuth.authenticate(
+                                                        this@MainActivity,
+                                                        onSuccess = { authenticated.value = true },
+                                                        onError = { },
+                                                    )
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+
+                                else -> DmtScreen(
+                                    state = state,
+                                    dispatch = playerViewModel::onIntent,
+                                    art = playerViewModel::homeArt,
+                                )
+                            }
+                            
+                            // --- TEMPORARY TEST BUTTON OVERLAY ---
+                            Button(
+                                onClick = { pickAudio.launch("audio/*") },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(24.dp)
+                            ) {
+                                Text("Test Raw Volume Pan")
+                            }
+                        }
                     }
-                }
                 }
             }
         }
@@ -155,5 +182,11 @@ class MainActivity : FragmentActivity() {
         } else {
             playerViewModel.onIntent(DmtAction.NoEqualizer)
         }
+    }
+    
+    // Clean up the player when the Activity is destroyed
+    override fun onDestroy() {
+        super.onDestroy()
+        rawPlayer.stop()
     }
 }
