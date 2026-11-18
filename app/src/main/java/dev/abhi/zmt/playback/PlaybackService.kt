@@ -363,7 +363,6 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(sessionActivity())
             .setMediaButtonPreferences(sessionButtons(player))
             .build()
-            
         scope.launch {
             preferencesRepository.settings.collect { settings ->
                 stopOnDismiss = settings.stopOnDismiss
@@ -371,16 +370,13 @@ class PlaybackService : MediaLibraryService() {
                     normalizeVolume = settings.normalizeVolume
                     applyReplayGain(player.currentMediaItem)
                 }
-                // FIX: Safely convert crossfadeDuration to Long milliseconds
-                crossfadeDurationMs = when (val duration = settings.crossfadeDuration) {
-                    is kotlin.time.Duration -> duration.inWholeMilliseconds
-                    is Long -> duration
-                    is Int -> duration.toLong()
-                    else -> 0L
-                }
+                // FIX 3: Simple, safe conversion that avoids impossible type checks
+                crossfadeDurationMs = settings.crossfadeDuration.toLong() * 1000L
                 gaplessEnabled = settings.gapless && crossfadeDurationMs <= 0L
             }
         }
+            
+
         
         btReceiver = BluetoothReceiver {
             if (mediaSession?.player?.isPlaying == false && mediaSession?.player?.mediaItemCount ?: 0 > 0) {
