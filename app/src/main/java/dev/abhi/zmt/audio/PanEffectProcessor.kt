@@ -24,8 +24,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
     private var sampleRate = DEFAULT_SAMPLE_RATE
     private var isFormatSupported = false
 
+    // ALWAYS ACTIVE so Media3 keeps it in the chain
     override fun isActive(): Boolean {
-        return true // ALWAYS ACTIVE
+        return true
     }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
@@ -40,6 +41,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
             lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
             highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
 
+            // Reset state here on every track/format change
             lfoPhase = 0.0f
             volumeEnvelope = 0.0f
             
@@ -57,12 +59,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
-        Log.d(TAG, "🔄 queueInput START: Processing $size bytes")
-
         val outputBuffer = replaceOutputBuffer(size)
 
         if (!isFormatSupported) {
-            Log.d(TAG, "⏩ Passing through unchanged")
             outputBuffer.put(inputBuffer)
             inputBuffer.position(limit)
             return
@@ -118,7 +117,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
             i += 4
         }
 
-        // Copy any leftover bytes (safety net)
+        // Copy any leftover bytes (safety net for odd-sized buffers)
         while (i < limit) {
             outputBuffer.put(inputBuffer.get(i))
             i++
@@ -128,15 +127,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
         if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
 
         inputBuffer.position(limit)
-        Log.d(TAG, "✅ queueInput END: Successfully wrote to output buffer")
     }
 
-    override fun flush() {
-        super.flush()
-        lfoPhase = 0.0f
-        volumeEnvelope = 0.0f
-    }
-
+    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
         private val w0 = 2.0f * Math.PI.toFloat() * freqHz / sampleRateHz
