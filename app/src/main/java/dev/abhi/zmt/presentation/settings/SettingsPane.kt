@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.R
+import dev.abhi.zmt.audio.PanConfig // <-- ADDED IMPORT
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
@@ -58,6 +59,12 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
     val settings = state.settings
     val on = stringResource(R.string.on)
     val off = stringResource(R.string.off)
+
+    // --- PingPong DSP Local State ---
+    val freqOn = remember { mutableStateOf(PanConfig.isFreqPanEnabled) }
+    val volOn = remember { mutableStateOf(PanConfig.isVolPanEnabled) }
+    val presetName = remember { mutableStateOf(PanConfig.currentPreset.name.lowercase()) }
+    val speedVal = remember { mutableStateOf(PanConfig.speedMultiplier) }
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Caption(stringResource(R.string.section_playback))
@@ -151,6 +158,45 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             dispatch(DmtAction.Config(settings.copy(listSpecs = !settings.listSpecs)))
         }
         AccentRow(settings = settings, dispatch = dispatch)
+
+        // --- NEW: PingPong DSP Section ---
+        Caption("pingpong dsp")
+        SettingRow(
+            label = "frequency pan",
+            value = if (freqOn.value) "on" else "off",
+        ) {
+            freqOn.value = !freqOn.value
+            PanConfig.isFreqPanEnabled = freqOn.value
+        }
+        SettingRow(
+            label = "volume pan",
+            value = if (volOn.value) "on" else "off",
+        ) {
+            volOn.value = !volOn.value
+            PanConfig.isVolPanEnabled = volOn.value
+        }
+        SettingRow(
+            label = "pan preset",
+            value = presetName.value,
+        ) {
+            val next = when (PanConfig.currentPreset) {
+                PanConfig.Preset.GENTLE -> PanConfig.Preset.SMOOTH
+                PanConfig.Preset.SMOOTH -> PanConfig.Preset.WAVE
+                PanConfig.Preset.WAVE -> PanConfig.Preset.GENTLE
+            }
+            PanConfig.currentPreset = next
+            presetName.value = next.name.lowercase()
+        }
+        SettingRow(
+            label = "pan speed",
+            value = "${speedVal.value}x",
+        ) {
+            val steps = listOf(0.5f, 1.0f, 1.5f, 2.0f, 3.0f)
+            val idx = (steps.indexOf(speedVal.value) + 1) % steps.size
+            speedVal.value = steps[idx]
+            PanConfig.speedMultiplier = steps[idx]
+        }
+        // ---------------------------------
 
         Caption(stringResource(R.string.tools))
         SettingRow(
