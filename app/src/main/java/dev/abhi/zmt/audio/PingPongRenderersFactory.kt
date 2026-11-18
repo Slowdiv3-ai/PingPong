@@ -8,7 +8,7 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 class PingPongRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
 
     // Temporarily commented out to test if the ROM is still crashing
-    // private val panProcessor = PanEffectProcessor()
+private val panProcessor = PanEffectProcessor()
 
     override fun buildAudioSink(
         context: Context,
@@ -18,7 +18,7 @@ class PingPongRenderersFactory(context: Context) : DefaultRenderersFactory(conte
         return DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(false)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            // REMOVED: .setAudioProcessors(arrayOf(panProcessor))
+            .setAudioProcessors(arrayOf(panProcessor))
             .build()
     }
 }
