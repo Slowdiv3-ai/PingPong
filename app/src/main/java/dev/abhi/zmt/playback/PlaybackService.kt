@@ -187,7 +187,9 @@ class PlaybackService : MediaLibraryService() {
             .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
+                    // WORKAROUND: Use USAGE_GAME to bypass buggy OEM "SoundBooster" global effects
+                    // that crash on session 0 and cause AudioTrack timeouts.
+                    .setUsage(C.USAGE_GAME)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
                 handleAudioFocus,
