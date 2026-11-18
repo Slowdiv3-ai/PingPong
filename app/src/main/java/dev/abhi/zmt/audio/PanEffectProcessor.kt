@@ -3,8 +3,8 @@ package dev.abhi.zmt.audio
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.Format
-import androidx.media3.exoplayer.audio.AudioProcessor
-import androidx.media3.exoplayer.audio.BaseAudioProcessor
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
 import kotlin.math.*
 
@@ -36,9 +36,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
     }
 
     override fun onConfigure(inputFormat: Format): Format {
-        // FIX 1: Media3 uses pcmEncoding, not encoding
+        // Media3 1.5.0+ uses pcmEncoding instead of encoding
         if (inputFormat.pcmEncoding != C.ENCODING_PCM_16BIT) {
-            // FIX 2: ConfigurationException is nested inside AudioProcessor
+            // ConfigurationException is now nested inside AudioProcessor
             throw AudioProcessor.ConfigurationException("Unsupported encoding: ${inputFormat.pcmEncoding}")
         }
         
