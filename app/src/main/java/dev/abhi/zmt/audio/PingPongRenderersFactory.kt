@@ -17,8 +17,6 @@ class PingPongRenderersFactory(context: Context) : DefaultRenderersFactory(conte
         return DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(false)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            // 🚀 MAGIC BULLET: Explicitly opt-out of buggy global system audio effects (like SoundBooster)
-            .setEnableAudioEffects(false)
             .setAudioProcessors(arrayOf(panProcessor))
             .build()
     }
