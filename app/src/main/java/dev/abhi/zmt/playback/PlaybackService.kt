@@ -363,20 +363,19 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(sessionActivity())
             .setMediaButtonPreferences(sessionButtons(player))
             .build()
-        scope.launch {
+
+            scope.launch {
             preferencesRepository.settings.collect { settings ->
                 stopOnDismiss = settings.stopOnDismiss
                 if (normalizeVolume != settings.normalizeVolume) {
                     normalizeVolume = settings.normalizeVolume
                     applyReplayGain(player.currentMediaItem)
                 }
-                // FIX 3: Simple, safe conversion that avoids impossible type checks
-                crossfadeDurationMs = settings.crossfadeDuration.toLong() * 1000L
+                // FIX: crossfadeDuration is an Enum with a 'seconds' Int property
+                crossfadeDurationMs = settings.crossfadeDuration.seconds * 1000L
                 gaplessEnabled = settings.gapless && crossfadeDurationMs <= 0L
             }
         }
-            
-
         
         btReceiver = BluetoothReceiver {
             if (mediaSession?.player?.isPlaying == false && mediaSession?.player?.mediaItemCount ?: 0 > 0) {
