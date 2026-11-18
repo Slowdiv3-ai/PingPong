@@ -6,44 +6,48 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
-    // REMOVED: Chaquopy plugin (no Python/yt-dlp needed for offline player)
+    alias(libs.plugins.chaquo)
 }
 
 val appVersionName = (project.findProperty("versionOverride") as String?) ?: "1.0"
 val appVersionCode =
-    appVersionName
-        .substringBefore("-")
-        .split(".")
-        .mapNotNull { it.toIntOrNull() }
-        .let {
-            (it.getOrElse(0) { 0 } * 10_000) + (it.getOrElse(1) { 0 } * 100) + it.getOrElse(2) { 0 }
-        }.coerceAtLeast(1)
+    appVersionName.substringBefore("-").split(".").mapNotNull { it.toIntOrNull() }
+        .let { (it.getOrElse(0) { 0 } * 10_000) + (it.getOrElse(1) { 0 } * 100) + it.getOrElse(2) { 0 } }
+        .coerceAtLeast(1)
 
 val keystoreProps: Properties? =
-    rootProject
-        .file("keystore.properties")
-        .takeIf { it.exists() }
+    rootProject.file("keystore.properties").takeIf { it.exists() }
         ?.let { file -> Properties().apply { file.inputStream().use(::load) } }
 
 fun signingValue(propertyKey: String, envKey: String): String? =
     keystoreProps?.getProperty(propertyKey) ?: System.getenv(envKey)
 
-base {
-    archivesName.set("PingPong-$appVersionName")
-}
+val telegramApiId: String =
+    rootProject.file("local.properties").takeIf { it.exists() }
+        ?.let { Properties().apply { it.inputStream().use(::load) } }
+        ?.getProperty("TELEGRAM_API_ID") ?: System.getenv("TELEGRAM_API_ID") ?: "0"
+val telegramApiHash: String =
+    rootProject.file("local.properties").takeIf { it.exists() }
+        ?.let { Properties().apply { it.inputStream().use(::load) } }
+        ?.getProperty("TELEGRAM_API_HASH") ?: System.getenv("TELEGRAM_API_HASH") ?: ""
+
+base { archivesName.set("PingPong-$appVersionName") }
 
 android {
     namespace = "dev.abhi.zmt"
-    compileSdk = 34
+    ndkVersion = "29.0.14206865"
+    externalNativeBuild { cmake { version = "4.1.2"; path = file("src/main/cpp/CMakeLists.txt") } }
+    compileSdk { version = release(37) }
 
     defaultConfig {
         applicationId = "dev.abhi.zmt"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 37
         versionCode = appVersionCode
         versionName = appVersionName
-        
-        // Removed NDK abiFilters since we no longer compile C++/Python code
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
+        buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
     }
 
     signingConfigs {
@@ -60,41 +64,36 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
+            optimization { enable = true }
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
         }
-        debug {
-            isMinifyEnabled = false
+    }
+
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
+
+    packaging { jniLibs.useLegacyPackaging = true }
+
+    chaquopy {
+        defaultConfig {
+            version = "3.12"
+            pip {
+                install("yt-dlp>=2026.07.04")
+                install("yt-dlp-ejs>=0.8.0")
+                install("pip")
+            }
         }
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
+    buildFeatures { compose = true; buildConfig = true }
 
     packaging {
         resources {
             excludes += setOf(
-                "META-INF/LICENSE.md",
-                "META-INF/LICENSE-notice.md",
-                "META-INF/LICENSE.txt",
-                "META-INF/NOTICE",
-                "META-INF/NOTICE.txt",
-                "META-INF/DEPENDENCIES",
-                "META-INF/proguard/coroutines.pro",
-                "META-INF/INDEX.LIST",
-                "META-INF/io.netty.versions",
-                "META-INF/LSRC-INF",
+                "META-INF/LICENSE.md", "META-INF/LICENSE-notice.md", "META-INF/LICENSE.txt",
+                "META-INF/NOTICE", "META-INF/NOTICE.txt", "META-INF/DEPENDENCIES",
+                "META-INF/proguard/coroutines.pro", "META-INF/INDEX.LIST",
+                "META-INF/io.netty.versions", "META-INF/LSRC-INF",
             )
         }
     }
@@ -106,30 +105,20 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
-    
-    // Local modules
     implementation(project(":metadata"))
     implementation(project(":lyrics"))
-    
-    // Core Android
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.biometric)
-    
-    // Media3 (ExoPlayer) - The heart of PingPong
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.datasource)
     implementation(libs.media3.datasource.okhttp)
     implementation(files("libs/media3-decoder-ffmpeg-1.10.1.aar"))
-    
-    // Coroutines & DI
     implementation(libs.kotlinx.coroutines.guava)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    
-    // Networking (Kept for LRCLIB lyrics fetching, which is safe and lightweight)
+    implementation(libs.androidx.biometric)
+    implementation("androidx.fragment:fragment-ktx:1.8.6")
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.okhttp)
@@ -139,11 +128,43 @@ dependencies {
     implementation(libs.ktor.serialization.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.slf4j.nop)
-    
-    // REMOVED: tdlib (Telegram), Chaquopy, and Python-specific dependencies
-    
+    implementation(libs.tdlib)
+    ksp(libs.hilt.compiler)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
 }
 
-// REMOVED: All Chaquopy/QuickJS afterEvaluate blocks and Python proguard tasks
+afterEvaluate {
+    val jniLibs = file("${layout.projectDirectory}/src/main/jniLibs").also { it.mkdirs() }
+    android.buildTypes.forEach { type ->
+        val typeCapitalized = type.name.let { it.first().uppercase() + it.substring(1) }
+        tasks.named("assemble${typeCapitalized}").configure {
+            doFirst {
+                val cxxDir = file("${layout.buildDirectory.get()}/intermediates/cxx/${if (typeCapitalized == "Debug") "Debug" else "RelWithDebInfo"}")
+                cxxDir.walkTopDown().forEach cxx@{ f ->
+                    if (f.name != "qjs") return@cxx
+                    f.copyTo(target = jniLibs.resolve(f.parentFile.name).also { it.mkdirs() }.resolve("libqjs.so"), overwrite = true)
+                }
+            }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("minify") || it.name.startsWith("transformClassesAndResourcesWithProguard") }.configureEach {
+    dependsOn("createPythonProguardDir")
+}
+
+tasks.register("createPythonProguardDir") {
+    doLast {
+        file("${layout.buildDirectory.get()}/python").mkdirs()
+        val proguard = file("${layout.buildDirectory.get()}/python/proguard-rules.pro")
+        if (!proguard.exists()) proguard.writeText(
+            """# Chaquopy auto-generated proguard rules
+-keep class com.chaquo.python.** { *; }
+-dontwarn com.chaquo.python.**
+-keep class org.bouncycastle.jsse.** { *; }
+-dontwarn org.bouncycastle.jsse.**
+"""
+        )
+    }
+}
