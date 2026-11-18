@@ -350,12 +350,14 @@ class PlaybackService : MediaLibraryService() {
             },
         )
         
+        /*
         if (player.audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
             broadcastEffectSession(
                 AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION,
                 player.audioSessionId,
             )
         }
+        */
         
         val artworkLoader = DataSourceBitmapLoader.Builder(this).build()
         mediaSession = MediaLibrarySession.Builder(this, player, LibraryCallback())
@@ -1056,6 +1058,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     @OptIn(UnstableApi::class)
+    /*
     override fun onDestroy() {
         cancelCrossfade()
         try { btReceiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
@@ -1066,6 +1069,7 @@ class PlaybackService : MediaLibraryService() {
                 it.audioSessionId,
             )
         }
+        */
         scope.cancel()
         mediaSession?.run {
             player.release()
