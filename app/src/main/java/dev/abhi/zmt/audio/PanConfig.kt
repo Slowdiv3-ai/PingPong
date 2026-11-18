@@ -1,8 +1,7 @@
 package dev.abhi.zmt.audio
 
 object PanConfig {
-    // HARDCODED TO TRUE FOR TESTING
-    @Volatile var isFreqPanEnabled = true 
+    @Volatile var isFreqPanEnabled = true // HARDCODED ON
     @Volatile var isVolPanEnabled = false
     @Volatile var speedMultiplier = 1.0f
     @Volatile var crossoverHz = 300.0 
@@ -13,6 +12,5 @@ object PanConfig {
         SUBTLE(depth = 0.4f, attack = 0.05f, release = 0.1f)
     }
 
-    // HARDCODED TO WAVE FOR TESTING
-    @Volatile var currentPreset = Preset.WAVE 
+    @Volatile var currentPreset = Preset.WAVE // HARDCODED TO WAVE
 }
