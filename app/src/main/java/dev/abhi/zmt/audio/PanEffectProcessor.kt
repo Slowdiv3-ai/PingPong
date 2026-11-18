@@ -11,7 +11,6 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
     companion object {
         private const val TAG = "PingPongDSP"
-        private const val DEFAULT_SAMPLE_RATE = 44100
     }
 
     private var lowPassLeft: Biquad? = null
@@ -21,13 +20,10 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
     private var lfoPhase = 0.0f
     private var volumeEnvelope = 0.0f
-    private var sampleRate = DEFAULT_SAMPLE_RATE
+    private var sampleRate = 44100
     private var isFormatSupported = false
 
-    // ALWAYS ACTIVE so Media3 keeps it in the chain
-    override fun isActive(): Boolean {
-        return true
-    }
+    override fun isActive(): Boolean = true
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         isFormatSupported = (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount == 2)
@@ -41,13 +37,11 @@ class PanEffectProcessor : BaseAudioProcessor() {
             lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
             highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
 
-            // Reset state here on every track/format change
             lfoPhase = 0.0f
             volumeEnvelope = 0.0f
-            
-            Log.i(TAG, "✅ Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
+            Log.e(TAG, "✅✅✅ CONFIGURED SUCCESSFULLY! Format is supported. ✅✅✅")
         } else {
-            Log.w(TAG, "⚠️ Format not supported. Passing through.")
+            Log.e(TAG, "⚠️⚠️⚠️ FORMAT NOT SUPPORTED! Passing through raw. ⚠️⚠️⚠️")
         }
         return inputAudioFormat
     }
@@ -59,6 +53,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
+        // UNDENIABLE PROOF: If you see this in logcat, the DSP is running!
+        Log.e(TAG, "🔥🔥🔥 queueInput RUNNING! Processing $size bytes. isFormatSupported=$isFormatSupported 🔥🔥🔥")
+
         val outputBuffer = replaceOutputBuffer(size)
 
         if (!isFormatSupported) {
@@ -67,18 +64,18 @@ class PanEffectProcessor : BaseAudioProcessor() {
             return
         }
 
-        // SAFETY: Only process complete 4-byte frames (2 channels * 16-bit)
         val frameLimit = position + ((size / 4) * 4)
         var i = position
 
-        // Hardcoded LFO for testing (0.5 Hz wave)
         val lfoFreq = 0.5f 
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
         val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
         val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
         val cosA = cos(angle)
         val sinA = sin(angle)
-        val depth = 0.8f // Hardcoded depth
+        val depth = 0.8f
+
+        var processedFrames = 0
 
         while (i < frameLimit) {
             val b0 = inputBuffer.get(i).toInt() and 0xFF
@@ -115,9 +112,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
             outputBuffer.put((shortR.toInt() shr 8).toByte())
 
             i += 4
+            processedFrames++
         }
 
-        // Copy any leftover bytes (safety net for odd-sized buffers)
         while (i < limit) {
             outputBuffer.put(inputBuffer.get(i))
             i++
@@ -127,9 +124,9 @@ class PanEffectProcessor : BaseAudioProcessor() {
         if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
 
         inputBuffer.position(limit)
+        Log.e(TAG, "✅✅✅ Finished processing $processedFrames frames! Audio sent to sink. ✅✅✅")
     }
 
-    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
         private val w0 = 2.0f * Math.PI.toFloat() * freqHz / sampleRateHz
