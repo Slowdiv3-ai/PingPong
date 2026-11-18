@@ -13,36 +13,22 @@ class PanEffectProcessor : BaseAudioProcessor() {
         private const val TAG = "PingPongDSP"
     }
 
-    private var lowPassLeft: Biquad? = null
-    private var highPassLeft: Biquad? = null
-    private var lowPassRight: Biquad? = null
-    private var highPassRight: Biquad? = null
-
-    private var lfoPhase = 0.0f
-    private var volumeEnvelope = 0.0f
-    private var sampleRate = 44100
-    private var isFormatSupported = false
-
+    // MUST be true to keep the processor in the chain
     override fun isActive(): Boolean = true
 
-    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        isFormatSupported = (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount == 2)
-        
-        if (isFormatSupported) {
-            sampleRate = inputAudioFormat.sampleRate
-            val fc = PanConfig.crossoverHz.toFloat()
-            
-            lowPassLeft = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
-            highPassLeft = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
-            lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
-            highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
+    private var sampleRate = 44100
+    private var lfoPhase = 0.0f
 
-            lfoPhase = 0.0f
-            volumeEnvelope = 0.0f
-            Log.e(TAG, "✅✅✅ CONFIGURED SUCCESSFULLY! Format is supported. ✅✅✅")
-        } else {
-            Log.e(TAG, "⚠️⚠️⚠️ FORMAT NOT SUPPORTED! Passing through raw. ⚠️⚠️⚠️")
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        // Only support 16-bit stereo. Throw if not, so Media3 bypasses us safely.
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount != 2) {
+            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
+        
+        sampleRate = inputAudioFormat.sampleRate
+        lfoPhase = 0.0f
+        
+        Log.d(TAG, "✅ Volume Pan Configured! SampleRate: $sampleRate")
         return inputAudioFormat
     }
 
@@ -53,102 +39,63 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
-        // UNDENIABLE PROOF: If you see this in logcat, the DSP is running!
-        Log.e(TAG, "🔥🔥🔥 queueInput RUNNING! Processing $size bytes. isFormatSupported=$isFormatSupported 🔥🔥🔥")
-
+        // Request output buffer of the EXACT same size
         val outputBuffer = replaceOutputBuffer(size)
 
-        if (!isFormatSupported) {
-            outputBuffer.put(inputBuffer)
-            inputBuffer.position(limit)
-            return
-        }
-
-        val frameLimit = position + ((size / 4) * 4)
-        var i = position
-
+        // LFO: 0.5 Hz cycle (swaps left/right every 2 seconds)
         val lfoFreq = 0.5f 
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
-        val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
-        val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
-        val cosA = cos(angle)
-        val sinA = sin(angle)
-        val depth = 0.8f
 
-        var processedFrames = 0
+        var i = position
 
-        while (i < frameLimit) {
+        while (i < limit) {
+            // 1. Read Left Channel (16-bit Little Endian)
             val b0 = inputBuffer.get(i).toInt() and 0xFF
             val b1 = inputBuffer.get(i + 1).toInt() and 0xFF
+            val sampleL = (b0 or (b1 shl 8)).toShort() / 32768f
+
+            // 2. Read Right Channel (16-bit Little Endian)
             val b2 = inputBuffer.get(i + 2).toInt() and 0xFF
             val b3 = inputBuffer.get(i + 3).toInt() and 0xFF
+            val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
-            val sampleL = b0 or (b1 shl 8)
-            val sampleR = b2 or (b3 shl 8)
+            // 3. Calculate Panning (Constant Power Sine Wave)
+            // pan goes from 0.0 (Full Left) to 1.0 (Full Right)
+            val pan = (sin(lfoPhase) + 1.0f) / 2.0f
+            val angle = pan * (Math.PI.toFloat() / 2.0f)
+            
+            // Constant power gains prevent volume dips in the center
+            val leftGain = cos(angle)
+            val rightGain = sin(angle)
 
-            val floatL = sampleL.toShort() / 32768f
-            val floatR = sampleR.toShort() / 32768f
+            var outL = sampleL * leftGain
+            var outR = sampleR * rightGain
 
-            val loL = lowPassLeft?.process(floatL) ?: floatL
-            val hiL = highPassLeft?.process(floatL) ?: 0.0f
-            val loR = lowPassRight?.process(floatR) ?: floatR
-            val hiR = highPassRight?.process(floatR) ?: 0.0f
-
-            val targetL = (loL * sinA + hiL * cosA)
-            val targetR = (loR * cosA + hiR * sinA)
-
-            var outL = floatL * (1f - depth) + targetL * depth
-            var outR = floatR * (1f - depth) + targetR * depth
-
+            // 4. Hard clip to prevent distortion
             outL = outL.coerceIn(-1f, 1f)
             outR = outR.coerceIn(-1f, 1f)
 
+            // 5. Write Left Channel (16-bit Little Endian)
             val shortL = (outL * 32767f).toInt().toShort()
-            val shortR = (outR * 32767f).toInt().toShort()
-
             outputBuffer.put((shortL.toInt() and 0xFF).toByte())
             outputBuffer.put((shortL.toInt() shr 8).toByte())
+
+            // 6. Write Right Channel (16-bit Little Endian)
+            val shortR = (outR * 32767f).toInt().toShort()
             outputBuffer.put((shortR.toInt() and 0xFF).toByte())
             outputBuffer.put((shortR.toInt() shr 8).toByte())
 
+            // Advance 4 bytes (2 channels * 2 bytes)
             i += 4
-            processedFrames++
-        }
-
-        while (i < limit) {
-            outputBuffer.put(inputBuffer.get(i))
-            i++
-        }
-
-        lfoPhase += lfoStep * ((frameLimit - position) / 4)
-        if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
-
-        inputBuffer.position(limit)
-        Log.e(TAG, "✅✅✅ Finished processing $processedFrames frames! Audio sent to sink. ✅✅✅")
-    }
-
-    private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
-        enum class Type { LOWPASS, HIGHPASS }
-        private val w0 = 2.0f * Math.PI.toFloat() * freqHz / sampleRateHz
-        private val cosW0 = cos(w0)
-        private val alpha = sin(w0) / (2.0f * q)
-        private val b0: Float; private val b1: Float; private val b2: Float
-        private val a0: Float; private val a1: Float; private val a2: Float
-        private var x1 = 0.0f; private var x2 = 0.0f; private var y1 = 0.0f; private var y2 = 0.0f
-
-        init {
-            if (type == Type.LOWPASS) {
-                b0 = (1.0f - cosW0) / 2.0f; b1 = 1.0f - cosW0; b2 = (1.0f - cosW0) / 2.0f
-            } else {
-                b0 = (1.0f + cosW0) / 2.0f; b1 = -(1.0f + cosW0); b2 = (1.0f + cosW0) / 2.0f
+            
+            // Advance LFO phase
+            lfoPhase += lfoStep
+            if (lfoPhase > 2.0f * Math.PI.toFloat()) {
+                lfoPhase -= 2.0f * Math.PI.toFloat()
             }
-            a0 = 1.0f + alpha; a1 = -2.0f * cosW0; a2 = 1.0f - alpha
         }
 
-        fun process(input: Float): Float {
-            val y = (b0 * input + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0
-            x2 = x1; x1 = input; y2 = y1; y1 = y
-            return y
-        }
+        // Tell Media3 we consumed all input bytes
+        inputBuffer.position(limit)
     }
 }
