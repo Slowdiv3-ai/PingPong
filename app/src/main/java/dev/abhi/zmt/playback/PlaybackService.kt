@@ -371,8 +371,13 @@ class PlaybackService : MediaLibraryService() {
                     normalizeVolume = settings.normalizeVolume
                     applyReplayGain(player.currentMediaItem)
                 }
-                crossfadeDurationMs = settings.crossfadeDuration.seconds.inWholeMilliseconds
-                // Crossfade and gapless are mutually exclusive — crossfade wins
+                // FIX: Safely convert crossfadeDuration to Long milliseconds
+                crossfadeDurationMs = when (val duration = settings.crossfadeDuration) {
+                    is kotlin.time.Duration -> duration.inWholeMilliseconds
+                    is Long -> duration
+                    is Int -> duration.toLong()
+                    else -> 0L
+                }
                 gaplessEnabled = settings.gapless && crossfadeDurationMs <= 0L
             }
         }
