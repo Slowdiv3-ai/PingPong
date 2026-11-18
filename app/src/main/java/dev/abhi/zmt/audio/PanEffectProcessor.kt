@@ -24,9 +24,8 @@ class PanEffectProcessor : BaseAudioProcessor() {
     private var sampleRate = DEFAULT_SAMPLE_RATE
     private var isFormatSupported = false
 
-    // FIX 1: Must return true, otherwise Media3 bypasses this processor entirely
     override fun isActive(): Boolean {
-        return true
+        return true // ALWAYS ACTIVE
     }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
@@ -41,13 +40,12 @@ class PanEffectProcessor : BaseAudioProcessor() {
             lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
             highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
 
-            // FIX 2: Reset DSP state on every new track to prevent clipping/silence
             lfoPhase = 0.0f
             volumeEnvelope = 0.0f
             
-            Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
+            Log.i(TAG, "✅ Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
         } else {
-            Log.w(TAG, "Format not supported. Passing through.")
+            Log.w(TAG, "⚠️ Format not supported. Passing through.")
         }
         return inputAudioFormat
     }
@@ -59,33 +57,31 @@ class PanEffectProcessor : BaseAudioProcessor() {
 
         if (size == 0) return
 
+        Log.d(TAG, "🔄 queueInput START: Processing $size bytes")
+
         val outputBuffer = replaceOutputBuffer(size)
 
-        // If format isn't supported, pass through safely
         if (!isFormatSupported) {
+            Log.d(TAG, "⏩ Passing through unchanged")
             outputBuffer.put(inputBuffer)
             inputBuffer.position(limit)
             return
         }
 
+        // SAFETY: Only process complete 4-byte frames (2 channels * 16-bit)
+        val frameLimit = position + ((size / 4) * 4)
         var i = position
-        val isFreqOn = PanConfig.isFreqPanEnabled
-        val isVolOn = PanConfig.isVolPanEnabled
-        val preset = PanConfig.currentPreset
-        val speed = PanConfig.speedMultiplier
 
-        val lfoFreq = preset.lfoRateHz * speed
+        // Hardcoded LFO for testing (0.5 Hz wave)
+        val lfoFreq = 0.5f 
         val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / sampleRate)
-        
-        // Pre-calculate trig functions once per buffer for maximum performance
         val lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
         val angle = lfoVal * (Math.PI.toFloat() / 2.0f)
         val cosA = cos(angle)
         val sinA = sin(angle)
-        val depth = preset.depth
+        val depth = 0.8f // Hardcoded depth
 
-        while (i < limit) {
-            // Read Little Endian 16-bit samples manually (Safe for all buffer types)
+        while (i < frameLimit) {
             val b0 = inputBuffer.get(i).toInt() and 0xFF
             val b1 = inputBuffer.get(i + 1).toInt() and 0xFF
             val b2 = inputBuffer.get(i + 2).toInt() and 0xFF
@@ -97,44 +93,23 @@ class PanEffectProcessor : BaseAudioProcessor() {
             val floatL = sampleL.toShort() / 32768f
             val floatR = sampleR.toShort() / 32768f
 
-            var outL = floatL
-            var outR = floatR
+            val loL = lowPassLeft?.process(floatL) ?: floatL
+            val hiL = highPassLeft?.process(floatL) ?: 0.0f
+            val loR = lowPassRight?.process(floatR) ?: floatR
+            val hiR = highPassRight?.process(floatR) ?: 0.0f
 
-            if (isFreqOn || isVolOn) {
-                if (isFreqOn) {
-                    val loL = lowPassLeft?.process(floatL) ?: floatL
-                    val hiL = highPassLeft?.process(floatL) ?: 0.0f
-                    val loR = lowPassRight?.process(floatR) ?: floatR
-                    val hiR = highPassRight?.process(floatR) ?: 0.0f
+            val targetL = (loL * sinA + hiL * cosA)
+            val targetR = (loR * cosA + hiR * sinA)
 
-                    val targetL = (loL * sinA + hiL * cosA)
-                    val targetR = (loR * cosA + hiR * sinA)
+            var outL = floatL * (1f - depth) + targetL * depth
+            var outR = floatR * (1f - depth) + targetR * depth
 
-                    outL = floatL * (1f - depth) + targetL * depth
-                    outR = floatR * (1f - depth) + targetR * depth
-                }
-
-                if (isVolOn) {
-                    val currentVol = abs((outL + outR) / 2f)
-                    volumeEnvelope = if (currentVol > volumeEnvelope) {
-                        volumeEnvelope + (currentVol - volumeEnvelope) * preset.attack
-                    } else {
-                        volumeEnvelope + (currentVol - volumeEnvelope) * preset.release
-                    }
-                    val widthBoost = 1.0f + (volumeEnvelope * depth)
-                    outL *= widthBoost
-                    outR *= widthBoost
-                }
-            }
-
-            // Hard clip to prevent distortion
             outL = outL.coerceIn(-1f, 1f)
             outR = outR.coerceIn(-1f, 1f)
 
             val shortL = (outL * 32767f).toInt().toShort()
             val shortR = (outR * 32767f).toInt().toShort()
 
-            // Write Little Endian 16-bit samples manually
             outputBuffer.put((shortL.toInt() and 0xFF).toByte())
             outputBuffer.put((shortL.toInt() shr 8).toByte())
             outputBuffer.put((shortR.toInt() and 0xFF).toByte())
@@ -143,29 +118,30 @@ class PanEffectProcessor : BaseAudioProcessor() {
             i += 4
         }
 
-        lfoPhase += lfoStep * (size / 4)
+        // Copy any leftover bytes (safety net)
+        while (i < limit) {
+            outputBuffer.put(inputBuffer.get(i))
+            i++
+        }
+
+        lfoPhase += lfoStep * ((frameLimit - position) / 4)
         if (lfoPhase > 2.0f * Math.PI.toFloat()) lfoPhase -= 2.0f * Math.PI.toFloat()
 
-        // FIX 3: Advance input buffer to show we consumed it. 
-        // DO NOT call outputBuffer.flip() here. Media3 does it automatically.
         inputBuffer.position(limit)
+        Log.d(TAG, "✅ queueInput END: Successfully wrote to output buffer")
     }
 
     override fun flush() {
         super.flush()
-        // FIX 4: Reset state on seek/pause to prevent audio glitches
         lfoPhase = 0.0f
         volumeEnvelope = 0.0f
     }
 
-    // --- Inner Class: Biquad Filter ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
-
         private val w0 = 2.0f * Math.PI.toFloat() * freqHz / sampleRateHz
         private val cosW0 = cos(w0)
         private val alpha = sin(w0) / (2.0f * q)
-
         private val b0: Float; private val b1: Float; private val b2: Float
         private val a0: Float; private val a1: Float; private val a2: Float
         private var x1 = 0.0f; private var x2 = 0.0f; private var y1 = 0.0f; private var y2 = 0.0f
