@@ -1,5 +1,4 @@
 package dev.abhi.zmt.playback
-import dev.abhi.zmt.presentation.widget.MiniPlayerWidget
 
 import android.app.PendingIntent
 import android.bluetooth.BluetoothDevice
@@ -10,6 +9,9 @@ import android.graphics.Bitmap
 import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
@@ -19,12 +21,14 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.PlaybackStatsListener
@@ -45,28 +49,26 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import android.content.Context
 import dagger.hilt.android.AndroidEntryPoint
+import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.MainActivity
 import dev.abhi.zmt.R
+import dev.abhi.zmt.audio.PingPongRenderersFactory // <-- ADDED IMPORT
+import dev.abhi.zmt.data.remote.youtube.YoutubeStreamResolver
 import dev.abhi.zmt.data.repository.PreferencesRepository
+import dev.abhi.zmt.domain.model.CrossfadeDuration
 import dev.abhi.zmt.domain.model.LastSession
+import dev.abhi.zmt.domain.model.SleepFade
 import dev.abhi.zmt.domain.model.Track
 import dev.abhi.zmt.domain.model.toAlbums
 import dev.abhi.zmt.domain.model.toArtists
 import dev.abhi.zmt.domain.model.toFolders
 import dev.abhi.zmt.domain.repository.MediaRepository
 import dev.abhi.zmt.domain.usecase.MediaSourceProvider
+import dev.abhi.zmt.presentation.widget.MiniPlayerWidget
 import dev.abhi.zmt.util.notificationPermission
 import dev.abhi.zmt.util.resolveQueue
-import android.util.Log
-import dev.abhi.zmt.BuildConfig
-import androidx.media3.common.PlaybackException
-import androidx.media3.exoplayer.DefaultLoadControl
 import dev.abhi.zmt.util.toMediaItem
-import android.os.Handler
-import android.os.Looper
-import dev.abhi.zmt.domain.model.CrossfadeDuration
 import dev.jyotiraditya.metadata.AudioTags
 import dev.jyotiraditya.metadata.TagKey
 import kotlinx.coroutines.CoroutineScope
@@ -75,14 +77,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.math.pow
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private const val ROOT_ID = "root"
 private const val TRACKS_ID = "tracks"
@@ -114,6 +117,7 @@ private fun shuffleOrderLedBy(current: Int, count: Int): DefaultShuffleOrder {
 
     return DefaultShuffleOrder(order, Random.nextLong())
 }
+
 private const val MAX_ERROR_RETRIES = 1
 private const val RESUME_CHANNEL_ID = "resume"
 private const val RESUME_NOTIFICATION_ID = 2
@@ -158,11 +162,11 @@ class PlaybackService : MediaLibraryService() {
     private var crossfadeRunnable: Runnable? = null
     private var isCrossfading = false
     private var btReceiver: BluetoothReceiver? = null
+    
     @Inject lateinit var streamCache: StreamCacheManager
-    @Inject lateinit var youtubeStreamResolver: dev.abhi.zmt.data.remote.youtube.YoutubeStreamResolver
-
-    @Inject
-    lateinit var offlineCacheDataSourceFactory: OfflineCacheDataSourceFactory
+    @Inject lateinit var youtubeStreamResolver: YoutubeStreamResolver
+    @Inject lateinit var offlineCacheDataSourceFactory: OfflineCacheDataSourceFactory
+    
     private val gainCache = mutableMapOf<Long, Float>()
 
     @Volatile
@@ -180,17 +184,20 @@ class PlaybackService : MediaLibraryService() {
             },
         )
         val handleAudioFocus = true
-        val renderersFactory = DefaultRenderersFactory(this)
+        
+        // CHANGE 1: Use our custom PingPongRenderersFactory instead of DefaultRenderersFactory
+        val renderersFactory = PingPongRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            
         val mediaSourceFactory = DefaultMediaSourceFactory(offlineCacheDataSourceFactory)
 
         // Metrolist-tuned buffer: 50s min/max keeps audio playing smoothly
         // during seeks and network hiccups. 750ms start = faster first sound.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs */       50_000,
-                /* maxBufferMs */       50_000,
-                /* bufferForPlaybackMs */       750,
+                /* minBufferMs */ 50_000,
+                /* maxBufferMs */ 50_000,
+                /* bufferForPlaybackMs */ 750,
                 /* bufferForPlaybackAfterRebufferMs */ 2_000,
             )
             .build()
@@ -214,7 +221,8 @@ class PlaybackService : MediaLibraryService() {
                     parameters = buildUponParameters()
                         .setAudioOffloadPreferences(
                             AudioOffloadPreferences.Builder()
-                                .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
+                                // CHANGE 2: DISABLE offload so our AudioProcessor can intercept the PCM data!
+                                .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
                                 .setIsGaplessSupportRequired(true)
                                 .build(),
                         )
@@ -222,6 +230,7 @@ class PlaybackService : MediaLibraryService() {
                 },
             )
             .build()
+            
         val keepPlaybackHistory = false
         player.addAnalyticsListener(
             PlaybackStatsListener(keepPlaybackHistory) { eventTime, playbackStats ->
@@ -239,6 +248,7 @@ class PlaybackService : MediaLibraryService() {
                 recordStats(playedMs, mediaId)
             },
         )
+        
         setListener(
             object : Listener {
                 override fun onForegroundServiceStartNotAllowedException() {
@@ -246,6 +256,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             },
         )
+        
         player.addListener(
             object : Player.Listener {
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -338,18 +349,21 @@ class PlaybackService : MediaLibraryService() {
                 }
             },
         )
+        
         if (player.audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
             broadcastEffectSession(
                 AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION,
                 player.audioSessionId,
             )
         }
+        
         val artworkLoader = DataSourceBitmapLoader.Builder(this).build()
         mediaSession = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setBitmapLoader(FreshCopyBitmapLoader(CacheBitmapLoader(artworkLoader)))
             .setSessionActivity(sessionActivity())
             .setMediaButtonPreferences(sessionButtons(player))
             .build()
+            
         scope.launch {
             preferencesRepository.settings.collect { settings ->
                 stopOnDismiss = settings.stopOnDismiss
@@ -357,11 +371,12 @@ class PlaybackService : MediaLibraryService() {
                     normalizeVolume = settings.normalizeVolume
                     applyReplayGain(player.currentMediaItem)
                 }
-                crossfadeDurationMs = settings.crossfadeDuration.seconds * 1000L
+                crossfadeDurationMs = settings.crossfadeDuration.seconds.inWholeMilliseconds
                 // Crossfade and gapless are mutually exclusive — crossfade wins
                 gaplessEnabled = settings.gapless && crossfadeDurationMs <= 0L
             }
         }
+        
         btReceiver = BluetoothReceiver {
             if (mediaSession?.player?.isPlaying == false && mediaSession?.player?.mediaItemCount ?: 0 > 0) {
                 if (BuildConfig.DEBUG) Log.d("PlaybackService", "BT connected: auto-resuming")
@@ -974,10 +989,10 @@ class PlaybackService : MediaLibraryService() {
             scope.launch {
                 val player = mediaSession?.player
                 val fadeSetting = preferencesRepository.settings.first().sleepFade
-                if (fadeSetting != dev.abhi.zmt.domain.model.SleepFade.OFF && player != null) {
+                if (fadeSetting != SleepFade.OFF && player != null) {
                     val fadeStart = when (fadeSetting) {
-                        dev.abhi.zmt.domain.model.SleepFade.LOW -> 30_000L
-                        dev.abhi.zmt.domain.model.SleepFade.MED -> 60_000L
+                        SleepFade.LOW -> 30_000L
+                        SleepFade.MED -> 60_000L
                         else -> 0L
                     }
                     val fadeDuration = 10_000L
