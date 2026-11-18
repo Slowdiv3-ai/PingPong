@@ -8,15 +8,13 @@ pluginManagement {
             }
         }
         mavenCentral()
-        // REMOVED: Chaquopy Maven repository (no longer needed)
+        maven { url = uri("https://chaquo.com/maven") }
         gradlePluginPortal()
     }
 }
-
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
-
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -25,10 +23,7 @@ dependencyResolutionManagement {
         maven { url = uri("https://jitpack.io") }
     }
 }
-
-// Changed from "DMT" to "PingPong"
 rootProject.name = "PingPong"
-
 include(":app")
 include(":metadata")
 include(":lyrics")
