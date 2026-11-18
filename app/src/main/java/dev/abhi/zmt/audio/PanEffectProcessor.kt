@@ -22,48 +22,57 @@ class PanEffectProcessor : BaseAudioProcessor() {
     private var lfoPhase = 0.0f
     private var volumeEnvelope = 0.0f
     private var sampleRate = DEFAULT_SAMPLE_RATE
+    
+    // CRITICAL: Track if the current audio format is supported
+    private var isFormatSupported = false
 
-    // FIX 1: Always return true so Media3 keeps this processor in the audio chain.
-    // We handle the actual on/off state inside the queueInput loop below.
+    // Always return true so Media3 keeps this processor in the audio chain.
     override fun isActive(): Boolean {
         return true
     }
 
-    @Throws(AudioProcessor.UnhandledAudioFormatException::class)
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
-            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+        // Check if it's standard 16-bit stereo. If not, we will just pass it through unchanged.
+        isFormatSupported = (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount == 2)
+        
+        if (isFormatSupported) {
+            sampleRate = inputAudioFormat.sampleRate
+            val fc = PanConfig.crossoverHz.toFloat()
+            
+            lowPassLeft = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
+            highPassLeft = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
+            lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
+            highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
+
+            lfoPhase = 0.0f
+            volumeEnvelope = 0.0f
+            
+            Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
+        } else {
+            Log.w(TAG, "Format not 16-bit stereo (encoding: ${inputAudioFormat.encoding}, channels: ${inputAudioFormat.channelCount}). Passing through unchanged.")
         }
-
-        sampleRate = inputAudioFormat.sampleRate
-        val channelCount = inputAudioFormat.channelCount
-
-        if (channelCount != 2) {
-            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
-        }
-
-        // Reset DSP state on format change
-        lfoPhase = 0.0f
-        volumeEnvelope = 0.0f
-
-        val fc = PanConfig.crossoverHz.toFloat()
-        lowPassLeft = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
-        highPassLeft = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
-        lowPassRight = Biquad(Biquad.Type.LOWPASS, fc, sampleRate.toFloat())
-        highPassRight = Biquad(Biquad.Type.HIGHPASS, fc, sampleRate.toFloat())
-
-        Log.i(TAG, "Configured for ${sampleRate}Hz. Crossover: ${fc}Hz")
+        
+        // Never throw an exception here, or it will break the audio chain and cause silence!
         return inputAudioFormat
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val position = inputBuffer.position()
         val limit = inputBuffer.limit()
-        val frameCount = (limit - position) / 4
+        val size = limit - position
 
-        if (frameCount == 0) return
+        if (size == 0) return
 
-        val outputBuffer = replaceOutputBuffer(frameCount * 4)
+        // If the format isn't supported, just pass the buffer through unchanged
+        if (!isFormatSupported) {
+            val outputBuffer = replaceOutputBuffer(size)
+            outputBuffer.put(inputBuffer)
+            inputBuffer.position(limit)
+            return
+        }
+
+        val frameCount = size / 4 // 2 channels * 2 bytes per sample (16-bit)
+        val outputBuffer = replaceOutputBuffer(size)
         val outBytes = outputBuffer.array()
 
         var i = position
@@ -87,7 +96,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
             var outL = floatL
             var outR = floatR
 
-            // FIX 2: Only do the heavy DSP math if at least one effect is turned on
+            // Only do the heavy DSP math if at least one effect is turned on
             if (isFreqOn || isVolOn) {
                 if (isFreqOn) {
                     val loL = lowPassLeft?.process(floatL) ?: floatL
@@ -143,7 +152,7 @@ class PanEffectProcessor : BaseAudioProcessor() {
         outputBuffer.position(outIndex)
     }
 
-    // --- Inner Class: Biquad Filter (Strictly Float for performance and type safety) ---
+    // --- Inner Class: Biquad Filter (Strictly Float) ---
     private class Biquad(val type: Type, val freqHz: Float, val sampleRateHz: Float, val q: Float = 0.7071f) {
         enum class Type { LOWPASS, HIGHPASS }
 
