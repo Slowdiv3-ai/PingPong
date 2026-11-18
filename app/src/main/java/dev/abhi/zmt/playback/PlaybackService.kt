@@ -53,7 +53,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.MainActivity
 import dev.abhi.zmt.R
-import dev.abhi.zmt.audio.PingPongRenderersFactory // <-- ADDED IMPORT
+import dev.abhi.zmt.audio.PingPongRenderersFactory
 import dev.abhi.zmt.data.remote.youtube.YoutubeStreamResolver
 import dev.abhi.zmt.data.repository.PreferencesRepository
 import dev.abhi.zmt.domain.model.CrossfadeDuration
@@ -85,7 +85,6 @@ import javax.inject.Inject
 import kotlin.math.pow
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
 private const val ROOT_ID = "root"
 private const val TRACKS_ID = "tracks"
@@ -97,7 +96,6 @@ private const val FOLDERS_ID = "folders"
 private const val FOLDER_PREFIX = "folder/"
 private const val TAG = "PlaybackService"
 
-// Fisher-Yates shuffle, current track pinned at index 0.
 @OptIn(UnstableApi::class)
 private fun shuffleOrderLedBy(current: Int, count: Int): DefaultShuffleOrder {
     val order = IntArray(count) { it }
@@ -125,23 +123,20 @@ private const val RESUME_NOTIFICATION_ID = 2
 @AndroidEntryPoint
 class PlaybackService : MediaLibraryService() {
 
-    @Inject
-    lateinit var mediaSourceProvider: MediaSourceProvider
-
-    @Inject
-    lateinit var preferencesRepository: PreferencesRepository
+    @Inject lateinit var mediaSourceProvider: MediaSourceProvider
+    @Inject lateinit var preferencesRepository: PreferencesRepository
+    @Inject lateinit var streamCache: StreamCacheManager
+    @Inject lateinit var youtubeStreamResolver: YoutubeStreamResolver
+    @Inject lateinit var offlineCacheDataSourceFactory: OfflineCacheDataSourceFactory
 
     companion object {
         const val KEY_END_AT = "end_at"
         const val KEY_AUDIO_SESSION = "audio_session"
         val CMD_SLEEP_SET = SessionCommand("dev.abhi.zmt.command.SLEEP_SET", Bundle.EMPTY)
         val CMD_SLEEP_GET = SessionCommand("dev.abhi.zmt.command.SLEEP_GET", Bundle.EMPTY)
-        val CMD_AUDIO_SESSION =
-            SessionCommand("dev.abhi.zmt.command.AUDIO_SESSION", Bundle.EMPTY)
-        val CMD_TOGGLE_SHUFFLE =
-            SessionCommand("dev.abhi.zmt.command.TOGGLE_SHUFFLE", Bundle.EMPTY)
-        val CMD_CYCLE_REPEAT =
-            SessionCommand("dev.abhi.zmt.command.CYCLE_REPEAT", Bundle.EMPTY)
+        val CMD_AUDIO_SESSION = SessionCommand("dev.abhi.zmt.command.AUDIO_SESSION", Bundle.EMPTY)
+        val CMD_TOGGLE_SHUFFLE = SessionCommand("dev.abhi.zmt.command.TOGGLE_SHUFFLE", Bundle.EMPTY)
+        val CMD_CYCLE_REPEAT = SessionCommand("dev.abhi.zmt.command.CYCLE_REPEAT", Bundle.EMPTY)
         const val KEY_VOLUME = "volume"
         const val KEY_PRESET_INDEX = "preset_index"
         val CMD_SET_VOLUME = SessionCommand("dev.abhi.zmt.command.SET_VOLUME", Bundle.EMPTY)
@@ -162,18 +157,10 @@ class PlaybackService : MediaLibraryService() {
     private var crossfadeRunnable: Runnable? = null
     private var isCrossfading = false
     private var btReceiver: BluetoothReceiver? = null
-    
-    @Inject lateinit var streamCache: StreamCacheManager
-    @Inject lateinit var youtubeStreamResolver: YoutubeStreamResolver
-    @Inject lateinit var offlineCacheDataSourceFactory: OfflineCacheDataSourceFactory
-    
     private val gainCache = mutableMapOf<Long, Float>()
 
-    @Volatile
-    private var libraryCache: List<Track>? = null
-
-    @Volatile
-    private var libraryCacheSource: MediaRepository? = null
+    @Volatile private var libraryCache: List<Track>? = null
+    @Volatile private var libraryCacheSource: MediaRepository? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -185,21 +172,14 @@ class PlaybackService : MediaLibraryService() {
         )
         val handleAudioFocus = true
         
-        // CHANGE 1: Use our custom PingPongRenderersFactory instead of DefaultRenderersFactory
+        // Use our custom PingPongRenderersFactory
         val renderersFactory = PingPongRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             
         val mediaSourceFactory = DefaultMediaSourceFactory(offlineCacheDataSourceFactory)
 
-        // Metrolist-tuned buffer: 50s min/max keeps audio playing smoothly
-        // during seeks and network hiccups. 750ms start = faster first sound.
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs */ 50_000,
-                /* maxBufferMs */ 50_000,
-                /* bufferForPlaybackMs */ 750,
-                /* bufferForPlaybackAfterRebufferMs */ 2_000,
-            )
+            .setBufferDurationsMs(50_000, 50_000, 750, 2_000)
             .build()
 
         val player = ExoPlayer.Builder(this, renderersFactory)
@@ -221,7 +201,6 @@ class PlaybackService : MediaLibraryService() {
                     parameters = buildUponParameters()
                         .setAudioOffloadPreferences(
                             AudioOffloadPreferences.Builder()
-                                // CHANGE 2: DISABLE offload so our AudioProcessor can intercept the PCM data!
                                 .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
                                 .setIsGaplessSupportRequired(true)
                                 .build(),
@@ -235,161 +214,121 @@ class PlaybackService : MediaLibraryService() {
         player.addAnalyticsListener(
             PlaybackStatsListener(keepPlaybackHistory) { eventTime, playbackStats ->
                 val playedMs = playbackStats.totalPlayTimeMs
-                if (playedMs < 5_000L || eventTime.timeline.isEmpty) {
-                    return@PlaybackStatsListener
-                }
+                if (playedMs < 5_000L || eventTime.timeline.isEmpty) return@PlaybackStatsListener
+                
                 val mediaId = runCatching {
-                    eventTime.timeline
-                        .getWindow(eventTime.windowIndex, Timeline.Window())
-                        .mediaItem
-                        .mediaId
-                        .toLongOrNull()
+                    eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem.mediaId.toLongOrNull()
                 }.getOrNull()
                 recordStats(playedMs, mediaId)
             },
         )
         
-        setListener(
-            object : Listener {
-                override fun onForegroundServiceStartNotAllowedException() {
-                    notifyResumeBlocked()
-                }
-            },
-        )
+        setListener(object : Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                notifyResumeBlocked()
+            }
+        })
         
-        player.addListener(
-            object : Player.Listener {
-                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                    if (shuffleModeEnabled) {
-                        player.setShuffleOrder(
-                            shuffleOrderLedBy(
-                                player.currentMediaItemIndex,
-                                player.mediaItemCount,
-                            ),
-                        )
-                    }
-                    publishButtons()
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                if (shuffleModeEnabled) {
+                    player.setShuffleOrder(shuffleOrderLedBy(player.currentMediaItemIndex, player.mediaItemCount))
                 }
+                publishButtons()
+            }
 
-                override fun onRepeatModeChanged(repeatMode: Int) = publishButtons()
+            override fun onRepeatModeChanged(repeatMode: Int) = publishButtons()
 
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (!isPlaying) {
-                        saveSession()
-                        cancelCrossfade()
-                    } else {
-                        scheduleCrossfade(mediaSession?.player)
-                    }
-                    updateWidget()
-                }
-
-                override fun onPositionDiscontinuity(
-                    oldPosition: Player.PositionInfo,
-                    newPosition: Player.PositionInfo,
-                    reason: Int,
-                ) {
-                    if (reason == Player.DISCONTINUITY_REASON_SEEK) saveSession()
-                }
-
-                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    currentErrorRetries = 0
-                    if (isCrossfading) {
-                        player.volume = 1f
-                    }
-                    isCrossfading = false
-                    cancelCrossfade()
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) {
                     saveSession()
-                    applyReplayGain(mediaItem)
-                    updateWidget()
-                    scheduleCrossfade(player)
-                    // Pre-cache next track in background for instant skip
-                    preCacheNext(player)
+                    cancelCrossfade()
+                } else {
+                    scheduleCrossfade(mediaSession?.player)
                 }
+                updateWidget()
+            }
 
-                override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                    broadcastEffectSession(
-                        AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION,
-                        audioSessionId,
-                    )
-                }
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) saveSession()
+            }
 
-                override fun onPlayerError(error: PlaybackException) {
-                    if (BuildConfig.DEBUG) Log.e("PlaybackService", "Player error: ${error.errorCodeName} (${error.errorCode})")
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                currentErrorRetries = 0
+                if (isCrossfading) player.volume = 1f
+                isCrossfading = false
+                cancelCrossfade()
+                saveSession()
+                applyReplayGain(mediaItem)
+                updateWidget()
+                scheduleCrossfade(player)
+                preCacheNext(player)
+            }
 
-                    val isIoError = error.errorCode in setOf(
-                        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-                        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
-                        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                        PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
-                        PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
-                    )
+            override fun onPlayerError(error: PlaybackException) {
+                if (BuildConfig.DEBUG) Log.e("PlaybackService", "Player error: ${error.errorCodeName} (${error.errorCode})")
 
-                    if (isIoError && currentErrorRetries < MAX_ERROR_RETRIES) {
-                        currentErrorRetries++
-                        if (BuildConfig.DEBUG) Log.w("PlaybackService", "IO error, retry ${currentErrorRetries}/$MAX_ERROR_RETRIES (re-prepare)")
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            player.prepare()
-                            player.playWhenReady = true
-                        }
-                        return
+                val isIoError = error.errorCode in setOf(
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+                    PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
+                    PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+                )
+
+                if (isIoError && currentErrorRetries < MAX_ERROR_RETRIES) {
+                    currentErrorRetries++
+                    scope.launch {
+                        delay(500)
+                        player.prepare()
+                        player.playWhenReady = true
                     }
+                    return
+                }
 
-                    currentErrorRetries = 0
-                    if (player.mediaItemCount > 1) {
-                        val nextIndex = player.currentMediaItemIndex + 1
-                        if (nextIndex < player.mediaItemCount) {
-                            if (BuildConfig.DEBUG) Log.w("PlaybackService", "Auto-skipping to next track")
-                            player.seekToDefaultPosition(nextIndex)
-                        } else if (player.repeatMode == Player.REPEAT_MODE_ALL) {
-                            player.seekToDefaultPosition(0)
-                        }
+                currentErrorRetries = 0
+                if (player.mediaItemCount > 1) {
+                    val nextIndex = player.currentMediaItemIndex + 1
+                    if (nextIndex < player.mediaItemCount) {
+                        player.seekToDefaultPosition(nextIndex)
+                    } else if (player.repeatMode == Player.REPEAT_MODE_ALL) {
+                        player.seekToDefaultPosition(0)
                     }
                 }
-            },
-        )
+            }
+        })
         
-        /*
-        if (player.audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-            broadcastEffectSession(
-                AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION,
-                player.audioSessionId,
-            )
-        }
-        */
-        
+        // INTENTIONALLY OMITTED: We do not broadcast ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION.
+        // This prevents buggy OEM "SoundBooster" effects from attaching and stalling the AudioTrack.
+        // Viper4Android hooks globally at the AudioFlinger level and will still work perfectly.
+
         val artworkLoader = DataSourceBitmapLoader.Builder(this).build()
         mediaSession = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setBitmapLoader(FreshCopyBitmapLoader(CacheBitmapLoader(artworkLoader)))
             .setSessionActivity(sessionActivity())
             .setMediaButtonPreferences(sessionButtons(player))
             .build()
-
-            scope.launch {
+            
+        scope.launch {
             preferencesRepository.settings.collect { settings ->
                 stopOnDismiss = settings.stopOnDismiss
                 if (normalizeVolume != settings.normalizeVolume) {
                     normalizeVolume = settings.normalizeVolume
                     applyReplayGain(player.currentMediaItem)
                 }
-                // FIX: crossfadeDuration is an Enum with a 'seconds' Int property
                 crossfadeDurationMs = settings.crossfadeDuration.seconds * 1000L
                 gaplessEnabled = settings.gapless && crossfadeDurationMs <= 0L
             }
         }
         
         btReceiver = BluetoothReceiver {
-            if (mediaSession?.player?.isPlaying == false && mediaSession?.player?.mediaItemCount ?: 0 > 0) {
-                if (BuildConfig.DEBUG) Log.d("PlaybackService", "BT connected: auto-resuming")
+            if (mediaSession?.player?.isPlaying == false && (mediaSession?.player?.mediaItemCount ?: 0) > 0) {
                 mediaSession?.player?.play()
             }
         }
         val btFilter = IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED)
-        ContextCompat.registerReceiver(
-            this, btReceiver, btFilter,
-            ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
+        ContextCompat.registerReceiver(this, btReceiver, btFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     private fun applyReplayGain(mediaItem: MediaItem?) {
@@ -405,17 +344,8 @@ class PlaybackService : MediaLibraryService() {
                 val gainDb = path?.takeIf { it.isNotEmpty() }?.let { file ->
                     withContext(Dispatchers.IO) {
                         val tags = AudioTags.read(file)
-                        val replayGain = tags[TagKey.REPLAYGAIN_TRACK_GAIN]
-                            ?.firstOrNull()
-                            ?.replace("dB", "", ignoreCase = true)
-                            ?.trim()
-                            ?.toFloatOrNull()
-                        // R128 tags are referenced to -23 LUFS, ReplayGain to -18 LUFS
-                        val r128Gain = tags[TagKey.R128_TRACK_GAIN]
-                            ?.firstOrNull()
-                            ?.trim()
-                            ?.toIntOrNull()
-                            ?.let { it / 256f + 5f }
+                        val replayGain = tags[TagKey.REPLAYGAIN_TRACK_GAIN]?.firstOrNull()?.replace("dB", "", ignoreCase = true)?.trim()?.toFloatOrNull()
+                        val r128Gain = tags[TagKey.R128_TRACK_GAIN]?.firstOrNull()?.trim()?.toIntOrNull()?.let { it / 256f + 5f }
                         replayGain ?: r128Gain
                     }
                 }
@@ -429,25 +359,15 @@ class PlaybackService : MediaLibraryService() {
 
     @OptIn(UnstableApi::class)
     private fun sessionButtons(player: Player): List<CommandButton> {
-        val shuffleIcon = if (player.shuffleModeEnabled) {
-            CommandButton.ICON_SHUFFLE_ON
-        } else {
-            CommandButton.ICON_SHUFFLE_OFF
-        }
+        val shuffleIcon = if (player.shuffleModeEnabled) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
         val repeatIcon = when (player.repeatMode) {
             Player.REPEAT_MODE_ALL -> CommandButton.ICON_REPEAT_ALL
             Player.REPEAT_MODE_ONE -> CommandButton.ICON_REPEAT_ONE
             else -> CommandButton.ICON_REPEAT_OFF
         }
         return listOf(
-            CommandButton.Builder(shuffleIcon)
-                .setDisplayName(getString(R.string.auto_shuffle))
-                .setSessionCommand(CMD_TOGGLE_SHUFFLE)
-                .build(),
-            CommandButton.Builder(repeatIcon)
-                .setDisplayName(getString(R.string.auto_repeat))
-                .setSessionCommand(CMD_CYCLE_REPEAT)
-                .build(),
+            CommandButton.Builder(shuffleIcon).setDisplayName(getString(R.string.auto_shuffle)).setSessionCommand(CMD_TOGGLE_SHUFFLE).build(),
+            CommandButton.Builder(repeatIcon).setDisplayName(getString(R.string.auto_repeat)).setSessionCommand(CMD_CYCLE_REPEAT).build(),
         )
     }
 
@@ -463,49 +383,20 @@ class PlaybackService : MediaLibraryService() {
             libraryCache = null
             libraryCacheSource = source
         }
-        return libraryCache ?: withContext(Dispatchers.IO) {
-            source.scan()
-        }.also { libraryCache = it }
+        return libraryCache ?: withContext(Dispatchers.IO) { source.scan() }.also { libraryCache = it }
     }
 
     private fun searchLibrary(tracks: List<Track>, query: String): List<Track> =
-        tracks.filter {
-            it.title.contains(query, true) ||
-                    it.artist.contains(query, true) ||
-                    it.album.contains(query, true)
-        }
+        tracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) }
 
     @OptIn(UnstableApi::class)
-    private fun browsableItem(
-        id: String,
-        title: String,
-        subtitle: String? = null,
-        artwork: Uri? = null,
-        childrenAsGrid: Boolean = false,
-    ): MediaItem {
+    private fun browsableItem(id: String, title: String, subtitle: String? = null, artwork: Uri? = null, childrenAsGrid: Boolean = false): MediaItem {
         val extras = Bundle().apply {
-            putInt(
-                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
-                if (childrenAsGrid) {
-                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM
-                } else {
-                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM
-                },
-            )
+            putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, if (childrenAsGrid) MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM else MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM)
         }
         return MediaItem.Builder()
             .setMediaId(id)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(subtitle)
-                    .setArtworkUri(artwork)
-                    .setIsBrowsable(true)
-                    .setIsPlayable(false)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
-                    .setExtras(extras)
-                    .build(),
-            )
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(subtitle).setArtworkUri(artwork).setIsBrowsable(true).setIsPlayable(false).setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED).setExtras(extras).build())
             .build()
     }
 
@@ -513,369 +404,122 @@ class PlaybackService : MediaLibraryService() {
         val tracks = library()
         return when {
             parentId == ROOT_ID -> buildList {
-                add(
-                    browsableItem(
-                        id = TRACKS_ID,
-                        title = getString(R.string.auto_tracks),
-                    ),
-                )
-                add(
-                    browsableItem(
-                        id = ALBUMS_ID,
-                        title = getString(R.string.auto_albums),
-                        childrenAsGrid = true,
-                    ),
-                )
-                add(
-                    browsableItem(
-                        id = ARTISTS_ID,
-                        title = getString(R.string.auto_artists),
-                    ),
-                )
-                if (tracks.toFolders().isNotEmpty()) {
-                    add(
-                        browsableItem(
-                            id = FOLDERS_ID,
-                            title = getString(R.string.auto_folders),
-                        ),
-                    )
-                }
+                add(browsableItem(id = TRACKS_ID, title = getString(R.string.auto_tracks)))
+                add(browsableItem(id = ALBUMS_ID, title = getString(R.string.auto_albums), childrenAsGrid = true))
+                add(browsableItem(id = ARTISTS_ID, title = getString(R.string.auto_artists)))
+                if (tracks.toFolders().isNotEmpty()) add(browsableItem(id = FOLDERS_ID, title = getString(R.string.auto_folders)))
             }
-
             parentId == TRACKS_ID -> tracks.map { it.toMediaItem() }
-
-            parentId == ALBUMS_ID -> tracks.toAlbums().map { album ->
-                browsableItem(
-                    id = ALBUM_PREFIX + album.name,
-                    title = album.name,
-                    subtitle = album.artist,
-                    artwork = album.tracks.firstOrNull()?.coverUri,
-                )
-            }
-
+            parentId == ALBUMS_ID -> tracks.toAlbums().map { album -> browsableItem(id = ALBUM_PREFIX + album.name, title = album.name, subtitle = album.artist, artwork = album.tracks.firstOrNull()?.coverUri) }
             parentId.startsWith(ALBUM_PREFIX) -> {
                 val name = parentId.removePrefix(ALBUM_PREFIX)
-                tracks.toAlbums()
-                    .find { it.name == name }
-                    ?.tracks
-                    .orEmpty()
-                    .map { track ->
-                        track.toMediaItem()
-                            .buildUpon()
-                            .setMediaId("$parentId/${track.id}")
-                            .build()
-                    }
+                tracks.toAlbums().find { it.name == name }?.tracks.orEmpty().map { track -> track.toMediaItem().buildUpon().setMediaId("$parentId/${track.id}").build() }
             }
-
-            parentId == ARTISTS_ID -> tracks.toArtists().map { artist ->
-                browsableItem(
-                    id = ARTIST_PREFIX + artist.name,
-                    title = artist.name,
-                    artwork = artist.tracks.firstOrNull()?.coverUri,
-                )
-            }
-
+            parentId == ARTISTS_ID -> tracks.toArtists().map { artist -> browsableItem(id = ARTIST_PREFIX + artist.name, title = artist.name, artwork = artist.tracks.firstOrNull()?.coverUri) }
             parentId.startsWith(ARTIST_PREFIX) -> {
                 val name = parentId.removePrefix(ARTIST_PREFIX)
-                tracks.toArtists()
-                    .find { it.name == name }
-                    ?.tracks
-                    .orEmpty()
-                    .map { track ->
-                        track.toMediaItem()
-                            .buildUpon()
-                            .setMediaId("$parentId/${track.id}")
-                            .build()
-                    }
+                tracks.toArtists().find { it.name == name }?.tracks.orEmpty().map { track -> track.toMediaItem().buildUpon().setMediaId("$parentId/${track.id}").build() }
             }
-
-            parentId == FOLDERS_ID -> tracks.toFolders().map { folder ->
-                browsableItem(
-                    id = FOLDER_PREFIX + folder.path,
-                    title = folder.name,
-                )
-            }
-
+            parentId == FOLDERS_ID -> tracks.toFolders().map { folder -> browsableItem(id = FOLDER_PREFIX + folder.path, title = folder.name) }
             parentId.startsWith(FOLDER_PREFIX) -> {
                 val path = parentId.removePrefix(FOLDER_PREFIX)
-                tracks.toFolders()
-                    .find { it.path == path }
-                    ?.tracks
-                    .orEmpty()
-                    .map { track ->
-                        track.toMediaItem()
-                            .buildUpon()
-                            .setMediaId("$parentId/${track.id}")
-                            .build()
-                    }
+                tracks.toFolders().find { it.path == path }?.tracks.orEmpty().map { track -> track.toMediaItem().buildUpon().setMediaId("$parentId/${track.id}").build() }
             }
-
             else -> emptyList()
         }
     }
 
     @OptIn(UnstableApi::class)
     private inner class LibraryCallback : MediaLibrarySession.Callback {
-
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-        ): MediaSession.ConnectionResult {
-            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                .buildUpon()
-                .add(CMD_SLEEP_SET)
-                .add(CMD_SLEEP_GET)
-                .add(CMD_AUDIO_SESSION)
-                .add(CMD_TOGGLE_SHUFFLE)
-                .add(CMD_CYCLE_REPEAT)
-                .add(CMD_SET_VOLUME)
-                .add(CMD_SET_EQ_PRESET)
-                .build()
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(commands)
-                .build()
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                .add(CMD_SLEEP_SET).add(CMD_SLEEP_GET).add(CMD_AUDIO_SESSION).add(CMD_TOGGLE_SHUFFLE).add(CMD_CYCLE_REPEAT).add(CMD_SET_VOLUME).add(CMD_SET_EQ_PRESET).build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(commands).build()
         }
 
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle,
-        ): ListenableFuture<SessionResult> =
+        override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> =
             when (customCommand.customAction) {
-                CMD_SLEEP_SET.customAction -> {
-                    scheduleSleep(args.getLong(KEY_END_AT))
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                CMD_SLEEP_GET.customAction -> {
-                    val extras = Bundle().apply { putLong(KEY_END_AT, sleepEndAt ?: 0L) }
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, extras))
-                }
-
-                CMD_AUDIO_SESSION.customAction -> {
-                    val id = (mediaSession?.player as? ExoPlayer)?.audioSessionId ?: 0
-                    val extras = Bundle().apply { putInt(KEY_AUDIO_SESSION, id) }
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, extras))
-                }
-
-                CMD_TOGGLE_SHUFFLE.customAction -> {
-                    session.player.shuffleModeEnabled = !session.player.shuffleModeEnabled
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
+                CMD_SLEEP_SET.customAction -> { scheduleSleep(args.getLong(KEY_END_AT)); Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) }
+                CMD_SLEEP_GET.customAction -> { val extras = Bundle().apply { putLong(KEY_END_AT, sleepEndAt ?: 0L) }; Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, extras)) }
+                CMD_AUDIO_SESSION.customAction -> { val id = (mediaSession?.player as? ExoPlayer)?.audioSessionId ?: 0; val extras = Bundle().apply { putInt(KEY_AUDIO_SESSION, id) }; Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, extras)) }
+                CMD_TOGGLE_SHUFFLE.customAction -> { session.player.shuffleModeEnabled = !session.player.shuffleModeEnabled; Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) }
                 CMD_CYCLE_REPEAT.customAction -> {
-                    session.player.repeatMode = when (session.player.repeatMode) {
-                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                        else -> Player.REPEAT_MODE_OFF
-                    }
+                    session.player.repeatMode = when (session.player.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
                     Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
-
-                CMD_SET_VOLUME.customAction -> {
-                    val vol = args.getFloat(KEY_VOLUME, 1f).coerceIn(0f, 1f)
-                    session.player.volume = vol
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
+                CMD_SET_VOLUME.customAction -> { session.player.volume = args.getFloat(KEY_VOLUME, 1f).coerceIn(0f, 1f); Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) }
                 CMD_SET_EQ_PRESET.customAction -> {
-                    val presetIndex = args.getInt(KEY_PRESET_INDEX, -1)
-                    scope.launch {
-                        preferencesRepository.save(
-                            preferencesRepository.settings.first().copy(equalizerPreset = presetIndex)
-                        )
-                    }
+                    scope.launch { preferencesRepository.save(preferencesRepository.settings.first().copy(equalizerPreset = args.getInt(KEY_PRESET_INDEX, -1))) }
                     Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
-
                 else -> super.onCustomCommand(session, controller, customCommand, args)
             }
 
-        override fun onGetLibraryRoot(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(
-                LibraryResult.ofItem(
-                    browsableItem(
-                        id = ROOT_ID,
-                        title = getString(R.string.app_name),
-                    ),
-                    params,
-                ),
-            )
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> =
+            Futures.immediateFuture(LibraryResult.ofItem(browsableItem(id = ROOT_ID, title = getString(R.string.app_name)), params))
 
-        override fun onGetChildren(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            parentId: String,
-            page: Int,
-            pageSize: Int,
-            params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            scope.future {
-                LibraryResult.ofItemList(childrenOf(parentId), params)
-            }
+        override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
+            scope.future { LibraryResult.ofItemList(childrenOf(parentId), params) }
 
-        override fun onGetItem(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            mediaId: String,
-        ): ListenableFuture<LibraryResult<MediaItem>> =
+        override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String): ListenableFuture<LibraryResult<MediaItem>> =
             scope.future {
                 val track = library().find { it.id.toString() == mediaId }
-                if (track != null) {
-                    LibraryResult.ofItem(track.toMediaItem(), null)
-                } else {
-                    LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-                }
+                if (track != null) LibraryResult.ofItem(track.toMediaItem(), null) else LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
             }
 
-        override fun onSearch(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            query: String,
-            params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<Void>> =
+        override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?): ListenableFuture<LibraryResult<Void>> =
             scope.future {
-                val count = searchLibrary(library(), query).size
-                session.notifySearchResultChanged(
-                    browser,
-                    query,
-                    count,
-                    params,
-                )
+                session.notifySearchResultChanged(browser, query, searchLibrary(library(), query).size, params)
                 LibraryResult.ofVoid()
             }
 
-        override fun onGetSearchResult(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            query: String,
-            page: Int,
-            pageSize: Int,
-            params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            scope.future {
-                val results = searchLibrary(library(), query).map { it.toMediaItem() }
-                LibraryResult.ofItemList(results, params)
-            }
+        override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
+            scope.future { LibraryResult.ofItemList(searchLibrary(library(), query).map { it.toMediaItem() }, params) }
 
-        override fun onAddMediaItems(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            mediaItems: List<MediaItem>,
-        ): ListenableFuture<List<MediaItem>> =
-            scope.future {
-                resolveItems(mediaItems)
-            }
+        override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> =
+            scope.future { resolveItems(mediaItems) }
 
-        override fun onSetMediaItems(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            mediaItems: List<MediaItem>,
-            startIndex: Int,
-            startPositionMs: Long,
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+        override fun onSetMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
             scope.future {
                 val tracks = library()
                 val single = mediaItems.singleOrNull()
                 val query = single?.requestMetadata?.searchQuery
 
                 when {
-                    single != null && query != null ->
-                        queueOf(searchLibrary(tracks, query).ifEmpty { tracks }, 0)
-
-                    single != null && single.mediaId.startsWith(ALBUM_PREFIX) ->
-                        groupQueue(single.mediaId, ALBUM_PREFIX, tracks, startPositionMs) { key ->
-                            tracks.toAlbums().find { it.name == key }?.tracks
-                        }
-
-                    single != null && single.mediaId.startsWith(ARTIST_PREFIX) ->
-                        groupQueue(single.mediaId, ARTIST_PREFIX, tracks, startPositionMs) { key ->
-                            tracks.toArtists().find { it.name == key }?.tracks
-                        }
-
-                    single != null && single.mediaId.startsWith(FOLDER_PREFIX) ->
-                        groupQueue(single.mediaId, FOLDER_PREFIX, tracks, startPositionMs) { key ->
-                            tracks.toFolders().find { it.path == key }?.tracks
-                        }
-
+                    single != null && query != null -> queueOf(searchLibrary(tracks, query).ifEmpty { tracks }, 0)
+                    single != null && single.mediaId.startsWith(ALBUM_PREFIX) -> groupQueue(single.mediaId, ALBUM_PREFIX, tracks, startPositionMs) { key -> tracks.toAlbums().find { it.name == key }?.tracks }
+                    single != null && single.mediaId.startsWith(ARTIST_PREFIX) -> groupQueue(single.mediaId, ARTIST_PREFIX, tracks, startPositionMs) { key -> tracks.toArtists().find { it.name == key }?.tracks }
+                    single != null && single.mediaId.startsWith(FOLDER_PREFIX) -> groupQueue(single.mediaId, FOLDER_PREFIX, tracks, startPositionMs) { key -> tracks.toFolders().find { it.path == key }?.tracks }
                     single != null && single.localConfiguration == null -> {
                         val index = tracks.indexOfFirst { it.id.toString() == single.mediaId }
-                        if (index >= 0) {
-                            queueOf(tracks, index, startPositionMs)
-                        } else {
-                            MediaSession.MediaItemsWithStartPosition(
-                                resolveItems(mediaItems),
-                                startIndex,
-                                startPositionMs,
-                            )
-                        }
+                        if (index >= 0) queueOf(tracks, index, startPositionMs) else MediaSession.MediaItemsWithStartPosition(resolveItems(mediaItems), startIndex, startPositionMs)
                     }
-
-                    else -> MediaSession.MediaItemsWithStartPosition(
-                        resolveItems(mediaItems),
-                        startIndex,
-                        startPositionMs,
-                    )
+                    else -> MediaSession.MediaItemsWithStartPosition(resolveItems(mediaItems), startIndex, startPositionMs)
                 }
             }
 
-        override fun onPlaybackResumption(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            isForPlayback: Boolean,
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+        override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
             scope.future {
-                val session = preferencesRepository.lastSession()
-                    ?: throw UnsupportedOperationException()
-                val (existing, index, position) = session.resolveQueue(library())
-                    ?: throw UnsupportedOperationException()
+                val session = preferencesRepository.lastSession() ?: throw UnsupportedOperationException()
+                val (existing, index, position) = session.resolveQueue(library()) ?: throw UnsupportedOperationException()
                 queueOf(existing, index, position)
             }
 
-        private fun groupQueue(
-            mediaId: String,
-            prefix: String,
-            tracks: List<Track>,
-            startPositionMs: Long,
-            tracksFor: (String) -> List<Track>?,
-        ): MediaSession.MediaItemsWithStartPosition {
+        private fun groupQueue(mediaId: String, prefix: String, tracks: List<Track>, startPositionMs: Long, tracksFor: (String) -> List<Track>?): MediaSession.MediaItemsWithStartPosition {
             val key = mediaId.removePrefix(prefix).substringBeforeLast('/')
             val trackId = mediaId.substringAfterLast('/')
             val groupTracks = tracksFor(key).orEmpty()
             val index = groupTracks.indexOfFirst { it.id.toString() == trackId }
-            return if (index >= 0) {
-                queueOf(groupTracks, index, startPositionMs)
-            } else {
-                queueOf(tracks, 0)
-            }
+            return if (index >= 0) queueOf(groupTracks, index, startPositionMs) else queueOf(tracks, 0)
         }
 
-        private fun queueOf(
-            list: List<Track>,
-            index: Int,
-            positionMs: Long = 0L,
-        ): MediaSession.MediaItemsWithStartPosition =
-            MediaSession.MediaItemsWithStartPosition(
-                list.map { it.toMediaItem() },
-                index,
-                positionMs,
-            )
+        private fun queueOf(list: List<Track>, index: Int, positionMs: Long = 0L): MediaSession.MediaItemsWithStartPosition =
+            MediaSession.MediaItemsWithStartPosition(list.map { it.toMediaItem() }, index, positionMs)
 
         private suspend fun resolveItems(mediaItems: List<MediaItem>): List<MediaItem> {
             val tracks = library()
             return mediaItems.map { item ->
-                if (item.localConfiguration != null) {
-                    item
-                } else {
-                    tracks.find { it.id.toString() == item.mediaId.substringAfterLast('/') }
-                        ?.toMediaItem()
-                        ?: item
-                }
+                if (item.localConfiguration != null) item else tracks.find { it.id.toString() == item.mediaId.substringAfterLast('/') }?.toMediaItem() ?: item
             }
         }
     }
@@ -905,20 +549,15 @@ class PlaybackService : MediaLibraryService() {
                     var step = 0
                     val fadeOutRunnable = object : Runnable {
                         override fun run() {
-                            if (step >= steps) {
-                                return
-                            }
-                            val progress = step.toFloat() / steps
-                            p.volume = (1f - progress).coerceIn(0f, 1f)
+                            if (step >= steps) return
+                            p.volume = (1f - (step.toFloat() / steps)).coerceIn(0f, 1f)
                             step++
                             crossfadeHandler?.postDelayed(this, stepMs)
                         }
                     }
                     crossfadeHandler?.post(fadeOutRunnable)
                 }
-                if (remaining > 0L) {
-                    crossfadeHandler?.postDelayed(this, 500)
-                }
+                if (remaining > 0L) crossfadeHandler?.postDelayed(this, 500)
             }
         }
         crossfadeHandler?.postDelayed(crossfadeRunnable!!, 500)
@@ -931,11 +570,6 @@ class PlaybackService : MediaLibraryService() {
         isCrossfading = false
     }
 
-    /**
-     * Proactively cache the next track in the queue so skips feel instant.
-     * If already cached, does nothing. Otherwise triggers a background download
-     * via the StreamCacheManager so the track is ready when the user skips.
-     */
     private fun preCacheNext(player: Player) {
         val nextIndex = player.currentMediaItemIndex + 1
         if (nextIndex >= player.mediaItemCount) return
@@ -945,42 +579,26 @@ class PlaybackService : MediaLibraryService() {
             if (BuildConfig.DEBUG) Log.d(TAG, "Next track cached locally: $nextUri")
         } else {
             if (BuildConfig.DEBUG) Log.d(TAG, "Pre-caching next track: $nextUri")
-            // Trigger background download so next skip is instant
             scope.launch {
                 streamCache.cacheInBackground(nextUri) {
-                    // Resolve the stream URL using the resolver
                     val videoId = nextUri.removePrefix("youtube://video/")
-                    if (videoId.isNotBlank() && videoId != nextUri) {
-                        youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) }
-                    } else null
+                    if (videoId.isNotBlank() && videoId != nextUri) youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) } else null
                 }
             }
-            // Also evict old cache entries to stay under 512MB
-            scope.launch(Dispatchers.IO) {
-                streamCache.evictIfNeeded()
-            }
+            scope.launch(Dispatchers.IO) { streamCache.evictIfNeeded() }
         }
     }
 
     private fun saveSession() {
         val player = mediaSession?.player ?: return
         if (player.mediaItemCount == 0) return
-        val ids = (0 until player.mediaItemCount)
-            .mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
-        val session = LastSession(
-            queueIds = ids,
-            index = player.currentMediaItemIndex,
-            positionMs = player.currentPosition.coerceAtLeast(0L),
-        )
-        scope.launch {
-            preferencesRepository.saveSession(session)
-        }
+        val ids = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        val session = LastSession(queueIds = ids, index = player.currentMediaItemIndex, positionMs = player.currentPosition.coerceAtLeast(0L))
+        scope.launch { preferencesRepository.saveSession(session) }
     }
 
     private fun recordStats(playedMs: Long, mediaId: Long?) {
-        scope.launch {
-            preferencesRepository.recordPlayback(playedMs, mediaId)
-        }
+        scope.launch { preferencesRepository.recordPlayback(playedMs, mediaId) }
     }
 
     private fun scheduleSleep(endAt: Long) {
@@ -992,11 +610,7 @@ class PlaybackService : MediaLibraryService() {
                 val player = mediaSession?.player
                 val fadeSetting = preferencesRepository.settings.first().sleepFade
                 if (fadeSetting != SleepFade.OFF && player != null) {
-                    val fadeStart = when (fadeSetting) {
-                        SleepFade.LOW -> 30_000L
-                        SleepFade.MED -> 60_000L
-                        else -> 0L
-                    }
+                    val fadeStart = when (fadeSetting) { SleepFade.LOW -> 30_000L; SleepFade.MED -> 60_000L; else -> 0L }
                     val fadeDuration = 10_000L
                     val fadeAt = (end - fadeStart).coerceAtLeast(System.currentTimeMillis())
                     if (fadeAt > System.currentTimeMillis()) {
@@ -1006,8 +620,7 @@ class PlaybackService : MediaLibraryService() {
                         val steps = 20
                         val stepMs = fadeDuration / steps
                         for (i in 1..steps) {
-                            val vol = startVol * (1f - i.toFloat() / steps)
-                            player.volume = vol.coerceIn(0f, 1f)
+                            player.volume = (startVol * (1f - i.toFloat() / steps)).coerceIn(0f, 1f)
                             delay(stepMs)
                         }
                     }
@@ -1026,50 +639,33 @@ class PlaybackService : MediaLibraryService() {
 
     @OptIn(UnstableApi::class)
     private class FreshCopyBitmapLoader(private val delegate: BitmapLoader) : BitmapLoader {
-        override fun supportsMimeType(mimeType: String): Boolean =
-            delegate.supportsMimeType(mimeType)
-
-        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> =
-            fresh(delegate.decodeBitmap(data))
-
-        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> =
-            fresh(delegate.loadBitmap(uri))
-
+        override fun supportsMimeType(mimeType: String): Boolean = delegate.supportsMimeType(mimeType)
+        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = fresh(delegate.decodeBitmap(data))
+        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = fresh(delegate.loadBitmap(uri))
         private fun fresh(future: ListenableFuture<Bitmap>): ListenableFuture<Bitmap> =
-            Futures.transform(
-                future,
-                { it.copy(it.config ?: Bitmap.Config.ARGB_8888, false) ?: it },
-                MoreExecutors.directExecutor(),
-            )
+            Futures.transform(future, { it.copy(it.config ?: Bitmap.Config.ARGB_8888, false) ?: it }, MoreExecutors.directExecutor())
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
-        mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         saveSession()
         val player = mediaSession?.player
-        if (player == null || stopOnDismiss || !player.playWhenReady ||
-            player.mediaItemCount == 0
-        ) {
+        if (player == null || stopOnDismiss || !player.playWhenReady || player.mediaItemCount == 0) {
             player?.pause()
             stopSelf()
         }
     }
 
     @OptIn(UnstableApi::class)
-    /*
     override fun onDestroy() {
         cancelCrossfade()
         try { btReceiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
         clearListener()
-        (mediaSession?.player as? ExoPlayer)?.let {
-            broadcastEffectSession(
-                AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION,
-                it.audioSessionId,
-            )
-        }
-        */
+        
+        // INTENTIONALLY OMITTED: We do not broadcast ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION.
+        // This prevents buggy OEM "SoundBooster" effects from attaching and stalling the AudioTrack.
+        
         scope.cancel()
         mediaSession?.run {
             player.release()
@@ -1080,49 +676,24 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun sessionActivity(): PendingIntent =
-        PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
+        PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
 
     private fun notifyResumeBlocked() {
         val permission = notificationPermission
-        if (permission != null &&
-            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
+        if (permission != null && ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) return
 
         val manager = NotificationManagerCompat.from(this)
         if (!manager.areNotificationsEnabled()) return
 
-        manager.createNotificationChannel(
-            NotificationChannelCompat.Builder(
-                RESUME_CHANNEL_ID,
-                NotificationManagerCompat.IMPORTANCE_DEFAULT,
-            ).setName(getString(R.string.notif_resume_channel)).build(),
-        )
-        manager.notify(
-            RESUME_NOTIFICATION_ID,
-            NotificationCompat.Builder(this, RESUME_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_dmt)
-                .setContentTitle(getString(R.string.notif_resume_title))
-                .setContentText(getString(R.string.notif_resume_text))
-                .setContentIntent(sessionActivity())
-                .setAutoCancel(true)
-                .build(),
-        )
+        manager.createNotificationChannel(NotificationChannelCompat.Builder(RESUME_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT).setName(getString(R.string.notif_resume_channel)).build())
+        manager.notify(RESUME_NOTIFICATION_ID, NotificationCompat.Builder(this, RESUME_CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_dmt).setContentTitle(getString(R.string.notif_resume_title)).setContentText(getString(R.string.notif_resume_text)).setContentIntent(sessionActivity()).setAutoCancel(true).build())
     }
 
     private fun broadcastEffectSession(action: String, sessionId: Int) {
-        sendBroadcast(
-            Intent(action).apply {
-                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
-                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
-                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
-            },
-        )
+        sendBroadcast(Intent(action).apply {
+            putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+            putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+            putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+        })
     }
 }
