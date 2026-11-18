@@ -29,7 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.R
-import dev.abhi.zmt.audio.PanConfig // <-- ADDED IMPORT
+import dev.abhi.zmt.audio.PanConfig
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
@@ -179,10 +179,11 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             label = "pan preset",
             value = presetName.value,
         ) {
+            // FIXED: Cycle through SMOOTH -> WAVE -> SUBTLE -> SMOOTH
             val next = when (PanConfig.currentPreset) {
-                PanConfig.Preset.GENTLE -> PanConfig.Preset.SMOOTH
                 PanConfig.Preset.SMOOTH -> PanConfig.Preset.WAVE
-                PanConfig.Preset.WAVE -> PanConfig.Preset.GENTLE
+                PanConfig.Preset.WAVE -> PanConfig.Preset.SUBTLE
+                PanConfig.Preset.SUBTLE -> PanConfig.Preset.SMOOTH
             }
             PanConfig.currentPreset = next
             presetName.value = next.name.lowercase()
