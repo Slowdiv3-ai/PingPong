@@ -1077,7 +1077,7 @@ class PlayerViewModel @Inject constructor(
             loadLyrics(mediaItem)
             loadLiked(mediaItem)
             
-            // --- CRASH-PROOF RAW AUDIO PLAYER HOOK ---
+            // --- RAW AUDIO PLAYER HOOK ---
             val id = mediaItem?.mediaId
             val track = if (id != null) {
                 trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
@@ -1087,31 +1087,30 @@ class PlayerViewModel @Inject constructor(
             if (track != null) {
                 reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
                 
-                // Safely get the URI. Fallback to mediaItem's URI if track.uri is null.
+                // 1. Get the best possible URI/Path
                 val uriToPlay = track.uri ?: mediaItem?.localConfiguration?.uri
                 
                 if (uriToPlay != null) {
+                    android.util.Log.d("RawAudioPlayer", "Attempting to play URI: $uriToPlay")
+                    
                     try {
                         rawPlayer.playUri(context, uriToPlay, 0L,
                             onError = { msg -> 
-                                android.util.Log.e("RawAudioPlayer", "Playback error: $msg")
-                                reduce { it.copy(error = "Audio Error: $msg") }
-                                // Fallback to ExoPlayer on error
-                                controller?.volume = 1f
+                                android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg. Unmuting ExoPlayer.")
+                                controller?.volume = 1f // SAFETY NET: Unmute ExoPlayer if we fail
                             },
                             onSuccess = { 
-                                android.util.Log.d("RawAudioPlayer", "DSP Playback started successfully")
+                                android.util.Log.d("RawAudioPlayer", "DSP SUCCESS. Muting ExoPlayer.")
                             }
                         )
-                        controller?.volume = 0f // Mute ExoPlayer safely
+                        // Mute ExoPlayer immediately
+                        controller?.volume = 0f 
                     } catch (e: Exception) {
-                        android.util.Log.e("RawAudioPlayer", "Failed to start RawAudioPlayer", e)
-                        // Fallback to ExoPlayer if RawAudioPlayer throws an exception
+                        android.util.Log.e("RawAudioPlayer", "CRASH starting DSP", e)
                         controller?.volume = 1f
                     }
                 } else {
-                    android.util.Log.e("RawAudioPlayer", "URI is null for track: ${track.title}")
-                    // Fallback to ExoPlayer if URI is missing
+                    android.util.Log.e("RawAudioPlayer", "No URI found for track. Unmuting ExoPlayer.")
                     controller?.volume = 1f
                 }
             }
