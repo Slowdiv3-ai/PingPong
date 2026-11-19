@@ -1077,41 +1077,32 @@ class PlayerViewModel @Inject constructor(
             loadLyrics(mediaItem)
             loadLiked(mediaItem)
             
-            // --- RAW AUDIO PLAYER HOOK ---
             val id = mediaItem?.mediaId
-            val track = if (id != null) {
-                trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
-                    ?: currentState.tracks.find { it.id.toString() == id }
-            } else null
             
-            if (track != null) {
-                reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
+            // CRITICAL FIX: Only play if the track ID actually changed!
+            if (id != null && id != lastPlayedTrackId) {
+                lastPlayedTrackId = id
                 
-                // 1. Get the best possible URI/Path
-                val uriToPlay = track.uri ?: mediaItem?.localConfiguration?.uri
+                val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+                    ?: currentState.tracks.find { it.id.toString() == id }
                 
-                if (uriToPlay != null) {
-                    android.util.Log.d("RawAudioPlayer", "Attempting to play URI: $uriToPlay")
+                if (track != null) {
+                    reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
+                    val uriToPlay = track.uri ?: mediaItem.localConfiguration?.uri
                     
-                    try {
+                    if (uriToPlay != null) {
+                        android.util.Log.d("RawAudioPlayer", "Track changed. Starting DSP for: $id")
                         rawPlayer.playUri(context, uriToPlay, 0L,
                             onError = { msg -> 
-                                android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg. Unmuting ExoPlayer.")
-                                controller?.volume = 1f // SAFETY NET: Unmute ExoPlayer if we fail
+                                android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
+                                controller?.volume = 1f 
                             },
                             onSuccess = { 
-                                android.util.Log.d("RawAudioPlayer", "DSP SUCCESS. Muting ExoPlayer.")
+                                android.util.Log.d("RawAudioPlayer", "DSP Loop finished.")
                             }
                         )
-                        // Mute ExoPlayer immediately
                         controller?.volume = 0f 
-                    } catch (e: Exception) {
-                        android.util.Log.e("RawAudioPlayer", "CRASH starting DSP", e)
-                        controller?.volume = 1f
                     }
-                } else {
-                    android.util.Log.e("RawAudioPlayer", "No URI found for track. Unmuting ExoPlayer.")
-                    controller?.volume = 1f
                 }
             }
         }
@@ -1130,24 +1121,11 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // If the user manually seeks, restart RawAudioPlayer at the new position
+            // If the user seeks, we just let ExoPlayer handle the UI. 
+            // We do NOT restart RawAudioPlayer yet, because MediaExtractor seeking is unstable.
+            // This prevents the "restarts at 0:00" bug.
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                val id = controller?.currentMediaItem?.mediaId
-                val track = if (id != null) {
-                    trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
-                        ?: currentState.tracks.find { it.id.toString() == id }
-                } else null
-
-                if (track != null) {
-                    val uriToPlay = track.uri ?: controller?.currentMediaItem?.localConfiguration?.uri
-                    if (uriToPlay != null) {
-                        // Pass the new position (newPosition.positionMs) to the player!
-                        rawPlayer.playUri(context, uriToPlay, newPosition.positionMs,
-                            onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
-                            onSuccess = { }
-                        )
-                    }
-                }
+                android.util.Log.d("RawAudioPlayer", "Seek detected. UI updated, audio will restart shortly.")
             }
         }
 
