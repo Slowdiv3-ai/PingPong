@@ -76,13 +76,7 @@ class RawAudioPlayer {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
                         val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                        extractor.setDataSource(fd.fileDescriptor)
-                    } else {
-                        throw Exception("File not found: ${uri.path}")
-                    }
-                } else {
-                    extractor.setDataSource(context, uri, null)
-                }
+                        extractor.setDataSource(context, uri, null)
 
                 var audioTrackIndex = -1
                 var format: MediaFormat? = null
@@ -102,14 +96,20 @@ class RawAudioPlayer {
 
                 // 1. SELECT TRACK FIRST
                 extractor.selectTrack(audioTrackIndex)
+                
+                // CRITICAL FIX: Seek MUST happen AFTER selecting the track
+                if (startTimeMs > 0) {
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                }
+
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
                 // 2. SEEK AFTER SELECTING (This fixes the 0:00 bug!)
                 if (startTimeMs > 0) {
-                    Log.d(TAG, "Seeking to ${startTimeMs}ms")
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    // PREVIOUS_SYNC prevents jumping forward to the next keyframe (fixes the 00:03 bug)
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 }
 
                 codec = MediaCodec.createDecoderByType(mime)
