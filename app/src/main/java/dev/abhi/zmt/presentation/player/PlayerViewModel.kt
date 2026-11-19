@@ -1064,16 +1064,12 @@ class PlayerViewModel @Inject constructor(
 
 
     private var lastPlayedTrackId: String? = null
+    private var currentTrackUri: Uri? = null
     
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reduce {
-                it.withNowPlaying(controller).copy(
-                    showDownloadSheet = false,
-                    lyrics = null,
-                    fault = null,
-                    error = null,
-                )
+                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
             loadCover(mediaItem)
             loadTech(mediaItem)
@@ -1081,31 +1077,22 @@ class PlayerViewModel @Inject constructor(
             loadLiked(mediaItem)
             
             val id = mediaItem?.mediaId
+            val uri = mediaItem?.localConfiguration?.uri
             
-            // CRITICAL FIX: Only play if the track ID actually changed!
-            if (id != null && id != lastPlayedTrackId) {
-                lastPlayedTrackId = id
-                
+            // Save the URI for seeking
+            currentTrackUri = uri 
+
+            if (id != null && uri != null) {
                 val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
                     ?: currentState.tracks.find { it.id.toString() == id }
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    val uriToPlay = track.uri ?: mediaItem.localConfiguration?.uri
-                    
-                    if (uriToPlay != null) {
-                        android.util.Log.d("RawAudioPlayer", "Track changed. Starting DSP for: $id")
-                        rawPlayer.playUri(context, uriToPlay, 0L,
-                            onError = { msg -> 
-                                android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
-                                controller?.volume = 1f 
-                            },
-                            onSuccess = { 
-                                android.util.Log.d("RawAudioPlayer", "DSP Loop finished.")
-                            }
-                        )
-                        controller?.volume = 0f 
-                    }
+                    rawPlayer.playUri(context, uri, 0L,
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
+                        onSuccess = { }
+                    )
+                    controller?.volume = 0f 
                 }
             }
         }
@@ -1127,12 +1114,17 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // When the user manually seeks, sync our RawAudioPlayer to the new timestamp
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                android.util.Log.d("RawAudioPlayer", "Seek detected, syncing to ${newPosition.positionMs}ms")
-                rawPlayer.seekTo(newPosition.positionMs)
-                // Force resume to ensure it doesn't get stuck in a paused state after the seek
-                rawPlayer.resume()
+                val uri = currentTrackUri
+                if (uri != null) {
+                    android.util.Log.d("RawAudioPlayer", "Seeking to ${newPosition.positionMs}ms")
+                    // Restart the DSP player at the new timestamp
+                    rawPlayer.playUri(context, uri, newPosition.positionMs,
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
+                        onSuccess = { }
+                    )
+                    controller?.volume = 0f
+                }
             }
         }
 
