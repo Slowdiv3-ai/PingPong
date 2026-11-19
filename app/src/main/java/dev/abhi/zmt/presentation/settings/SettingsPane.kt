@@ -167,7 +167,9 @@ fun SettingsPane(
                     RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
                     RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
                 }
-                // Show a toast to prove it's connected!
+                // Update the local UI state so the text changes immediately!
+                currentMode = it.currentMode 
+                
                 val modeName = when (it.currentMode) {
                     RawAudioPlayer.PanMode.OFF -> "OFF"
                     RawAudioPlayer.PanMode.VOLUME -> "VOLUME PAN"
