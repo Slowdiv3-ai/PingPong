@@ -268,6 +268,16 @@ class RawAudioPlayer {
         }
     }
 
+    fun pause() {
+        isPaused = true
+        audioTrack?.pause()
+    }
+
+    fun resume() {
+        isPaused = false
+        audioTrack?.play()
+    }
+
     fun stop() {
         isPlaying = false
         playbackThread?.interrupt()
