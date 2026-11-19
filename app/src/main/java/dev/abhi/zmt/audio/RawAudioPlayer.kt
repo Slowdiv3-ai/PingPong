@@ -190,12 +190,18 @@ class RawAudioPlayer {
             var outL = sampleL; var outR = sampleR
 
             if (currentPreset == PanPreset.FREQ_UNDERWATER) {
-                // BREATHING LOWPASS: Sweeps from 200Hz (Underwater) to 16000Hz (Clear)
-                // Depth controls the range of the sweep
-                val minCutoff = 200f
-                val maxCutoff = 16000f
-                val currentCutoff = minCutoff + (maxCutoff - minCutoff) * (swing * depth)
+                // LOGARITHMIC SWEEP: Fixes the "lingering" rhythm. 
+                // Makes the sweep feel smooth and continuous across human hearing.
+                val logMin = ln(200f)
+                val logMax = ln(16000f)
                 
+                // INTENSITY SLIDER: depth controls how far down the Hz drops.
+                // If depth is 0, cutoff stays at 16000 (Normal). 
+                // If depth is 1, cutoff sweeps down to 200 (Underwater).
+                val sweepAmount = swing * depth
+                val currentLogCutoff = logMax - (logMax - logMin) * sweepAmount
+                val currentCutoff = exp(currentLogCutoff)
+
                 val alpha = 1.0f - exp(-2.0f * PI.toFloat() * currentCutoff / sampleRate)
                 val lowL = leftPrevLow + alpha * (sampleL - leftPrevLow); leftPrevLow = lowL
                 val lowR = rightPrevLow + alpha * (sampleR - rightPrevLow); rightPrevLow = lowR
