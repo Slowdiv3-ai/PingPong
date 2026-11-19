@@ -30,10 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import dagger.hilt.android.AndroidEntryPoint
-import dev.abhi.zmt.audio.RawAudioPlayer // <-- ADDED IMPORT
+import dev.abhi.zmt.audio.RawAudioPlayer
 import dev.abhi.zmt.presentation.main.DmtScreen
 import dev.abhi.zmt.presentation.main.SetupScreen
 import dev.abhi.zmt.presentation.player.DmtAction
@@ -52,8 +51,9 @@ class MainActivity : FragmentActivity() {
     private val playerViewModel: PlayerViewModel by viewModels()
     private val fingerprintAuth = FingerprintAuthManager()
     
-    // --- TEMPORARY TEST CODE START ---
+    // --- RAW AUDIO PLAYER INSTANCE ---
     private val rawPlayer = RawAudioPlayer()
+    
     private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             Toast.makeText(this, "File selected, attempting to play...", Toast.LENGTH_SHORT).show()
@@ -63,14 +63,13 @@ class MainActivity : FragmentActivity() {
                     Toast.makeText(this, "ERROR: $errorMsg", Toast.LENGTH_LONG).show()
                 },
                 onSuccess = {
-                    Toast.makeText(this, "Playing with Volume Pan!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Playing with PingPong DSP!", Toast.LENGTH_SHORT).show()
                 }
             )
         } else {
             Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show()
         }
     }
-    // --- TEMPORARY TEST CODE END ---
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,7 +126,6 @@ class MainActivity : FragmentActivity() {
                         }
 
                         Box(modifier = Modifier.fillMaxSize()) {
-                            // --- YOUR ORIGINAL UI LOGIC ---
                             when {
                                 !state.settingsLoaded -> Unit
                                 !state.settings.setupDone -> SetupScreen(
@@ -161,17 +159,18 @@ class MainActivity : FragmentActivity() {
                                     state = state,
                                     dispatch = playerViewModel::onIntent,
                                     art = playerViewModel::homeArt,
+                                    rawPlayer = rawPlayer, // <--- PASSED HERE
                                 )
                             }
                             
-                            // --- TEMPORARY TEST BUTTON OVERLAY ---
+                            // --- TEST BUTTON (You can remove this once you confirm settings work) ---
                             Button(
                                 onClick = { pickAudio.launch("audio/*") },
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
                                     .padding(24.dp)
                             ) {
-                                Text("Test Raw Volume Pan")
+                                Text("Test DSP Player")
                             }
                         }
                     }
@@ -196,7 +195,6 @@ class MainActivity : FragmentActivity() {
         }
     }
     
-    // Clean up the player when the Activity is destroyed
     override fun onDestroy() {
         super.onDestroy()
         rawPlayer.stop()
