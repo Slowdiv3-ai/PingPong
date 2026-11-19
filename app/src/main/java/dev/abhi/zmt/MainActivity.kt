@@ -54,8 +54,19 @@ class MainActivity : FragmentActivity() {
     // --- TEMPORARY TEST CODE START ---
     private val rawPlayer = RawAudioPlayer()
     private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            rawPlayer.playUri(this, it)
+        if (uri != null) {
+            Toast.makeText(this, "File selected, attempting to play...", Toast.LENGTH_SHORT).show()
+            
+            rawPlayer.playUri(this, uri, 
+                onError = { errorMsg ->
+                    Toast.makeText(this, "ERROR: $errorMsg", Toast.LENGTH_LONG).show()
+                },
+                onSuccess = {
+                    Toast.makeText(this, "Playing with Volume Pan!", Toast.LENGTH_SHORT).show()
+                }
+            )
+        } else {
+            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show()
         }
     }
     // --- TEMPORARY TEST CODE END ---
