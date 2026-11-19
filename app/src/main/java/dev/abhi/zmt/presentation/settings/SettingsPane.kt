@@ -78,12 +78,15 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
         SettingRow(label = stringResource(R.string.set_specs), value = if (settings.listSpecs) on else off) { dispatch(DmtAction.Config(settings.copy(listSpecs = !settings.listSpecs))) }
         AccentRow(settings = settings, dispatch = dispatch)
 
-        // ==========================================
+// ==========================================
         // --- PingPong DSP Section ---
         // ==========================================
         Caption("pingpong dsp")
         
-        val currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
+        // FIX 1: Changed 'val' to 'var' so the UI can actually update when clicked
+        var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
+        var currentPreset by remember { mutableStateOf(rawPlayer?.currentPreset ?: RawAudioPlayer.PanPreset.VOL_SMOOTH) }
+
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
             RawAudioPlayer.PanMode.VOLUME -> "volume"
@@ -103,10 +106,13 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                     RawAudioPlayer.PanMode.LOFI -> RawAudioPlayer.PanMode.TELEPHONE
                     RawAudioPlayer.PanMode.TELEPHONE -> RawAudioPlayer.PanMode.OFF
                 }
+                // FIX 2: Force the UI to refresh instantly
+                currentMode = player.currentMode 
             }
         }
 
-        val presetLabel = when (rawPlayer?.currentPreset) {
+        // FIX 3: Use the local 'currentPreset' variable instead of reading from the player directly
+        val presetLabel = when (currentPreset) {
             RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
             RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
             RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
@@ -144,12 +150,15 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                     RawAudioPlayer.PanMode.TELEPHONE -> if (player.currentPreset == RawAudioPlayer.PanPreset.TEL_VINTAGE) RawAudioPlayer.PanPreset.TEL_RADIO else RawAudioPlayer.PanPreset.TEL_VINTAGE
                     RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
                 }
+                // FIX 4: Force the UI to refresh instantly
+                currentPreset = player.currentPreset
             }
         }
 
         if (currentMode != RawAudioPlayer.PanMode.OFF) {
             val speed = rawPlayer?.lfoFreq ?: 0.5f
             val depth = rawPlayer?.depth ?: 0.8f
+
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("lfo speed", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
                 AsciiSlider(value = speed, min = 0.1f, max = 2.0f, steps = 19, onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed })
@@ -158,6 +167,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                 AsciiSlider(value = depth, min = 0.0f, max = 1.0f, steps = 10, onValueChange = { newDepth -> rawPlayer?.depth = newDepth })
             }
         }
+        // ==========================================
         // ==========================================
 
         Caption(stringResource(R.string.tools))
