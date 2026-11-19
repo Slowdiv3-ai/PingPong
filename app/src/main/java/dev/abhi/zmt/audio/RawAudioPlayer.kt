@@ -49,14 +49,12 @@ class RawAudioPlayer {
     // @Synchronized guarantees playUri and stop() can NEVER run at the same time
     @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Ignoring duplicate playUri call, thread is still alive")
-            return
-        }
-
+        stop() // Safely stop any previous playback
+        
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
+        // ... rest of the code ...
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
