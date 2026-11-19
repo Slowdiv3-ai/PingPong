@@ -52,7 +52,8 @@ class MainActivity : FragmentActivity() {
     private val fingerprintAuth = FingerprintAuthManager()
     
     // --- THIS IS THE ONLY PLAYER WITH DSP RIGHT NOW ---
-    private val rawPlayer = RawAudioPlayer()
+    // --- INJECT THE SAME SINGLETON INSTANCE USED BY VIEWMODEL ---
+    @Inject lateinit var rawPlayer: RawAudioPlayer
     
     private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
