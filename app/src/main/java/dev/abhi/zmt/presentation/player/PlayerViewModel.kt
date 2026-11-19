@@ -1063,7 +1063,7 @@ class PlayerViewModel @Inject constructor(
         }
 
     private val listener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+       override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reduce {
                 it.withNowPlaying(controller).copy(
                     showDownloadSheet = false,
@@ -1076,8 +1076,29 @@ class PlayerViewModel @Inject constructor(
             loadTech(mediaItem)
             loadLyrics(mediaItem)
             loadLiked(mediaItem)
-            loadCurrentTrack(mediaItem)
-        }
+            
+            // --- RAW AUDIO PLAYER HOOK ---
+            val id = mediaItem?.mediaId
+            val track = if (id != null) {
+                trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+                    ?: currentState.tracks.find { it.id.toString() == id }
+            } else null
+            
+            if (track != null) {
+                reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
+                
+                // Play through our DSP engine
+                rawPlayer.playUri(context, track.uri,
+                    onError = { msg -> 
+                        android.util.Log.e("RawAudioPlayer", "Playback error: $msg")
+                        reduce { it.copy(error = "Audio Error: $msg") }
+                    },
+                    onSuccess = { }
+                )
+                // Mute ExoPlayer so we don't hear double audio
+                controller?.volume = 0f
+            }
+        } 
 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
@@ -1085,6 +1106,12 @@ class PlayerViewModel @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
+            // Sync pause/resume with RawAudioPlayer
+            if (isPlaying) {
+                rawPlayer.resume()
+            } else {
+                rawPlayer.pause()
+            }
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -1546,7 +1573,12 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        controller?.release()
+        controller.release()
         controller = null
     }
+}
+override fun onCleared() {
+        controller?.release()
+        controller = null
+        rawPlayer.stop() // Clean up DSP player
 }
