@@ -1,5 +1,7 @@
 package dev.abhi.zmt.presentation.settings
 
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -153,17 +155,25 @@ fun SettingsPane(
             RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
         }
 
+        val context = LocalContext.current // Add this at the top of the Composable if not there
+
         SettingRow(
             label = "dsp mode",
             value = modeLabel,
         ) {
-            // Cycle mutually exclusively: OFF -> VOLUME -> FREQUENCY -> OFF
             rawPlayer?.let {
                 it.currentMode = when (it.currentMode) {
                     RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
                     RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
                     RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
                 }
+                // Show a toast to prove it's connected!
+                val modeName = when (it.currentMode) {
+                    RawAudioPlayer.PanMode.OFF -> "OFF"
+                    RawAudioPlayer.PanMode.VOLUME -> "VOLUME PAN"
+                    RawAudioPlayer.PanMode.FREQUENCY -> "FREQUENCY PAN"
+                }
+                Toast.makeText(context, "DSP Mode: $modeName", Toast.LENGTH_SHORT).show()
             }
         }
 
