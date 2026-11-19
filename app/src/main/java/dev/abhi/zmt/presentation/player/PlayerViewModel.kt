@@ -1133,18 +1133,17 @@ class PlayerViewModel @Inject constructor(
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 val uri = currentTrackUri
-                // Only seek if actually playing
-                if (uri != null && controller?.isPlaying == true) {
+                if (uri != null) {
                     android.util.Log.d("RawAudioPlayer", "Seeking to ${newPosition.positionMs}ms")
+                    // CRITICAL FIX: Instead of using buggy flush(), we just restart the 
+                    // playback thread at the exact new millisecond. This prevents the 0:00 restart bug.
                     rawPlayer.playUri(context, uri, newPosition.positionMs,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
                     )
-                    controller?.volume = 0f
                 }
             }
         }
-
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             controller?.let { c ->
                 val (queue, queuePosition) = c.queueWithPosition()
