@@ -34,10 +34,15 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
-    private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
-    private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
-    private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
-    private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
+    // Filter states
+    private var leftPrevLow = 0.0f
+    private var rightPrevLow = 0.0f
+    private var leftPrevHigh = 0.0f
+    private var rightPrevHigh = 0.0f
+    private var leftPrevInput = 0.0f
+    private var rightPrevInput = 0.0f
+    private var lofiHoldL = 0.0f
+    private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
     private var isPlaying = false
@@ -45,14 +50,15 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
+
+    // CRITICAL FIX: Declare these at the class level so seekTo() and refreshAudioTrack() can access them
+    private var currentExtractor: MediaExtractor? = null
+    private var currentCodec: MediaCodec? = null
     private var currentSampleRate: Int = 44100
 
-    @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        // YOUR IDEA: If already playing, safely stop and restart the whole player. 
-        // This completely bypasses MediaExtractor's buggy in-place seekTo()!
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Restarting player for seek/track change")
+            Log.d(TAG, "Stopping existing playback to start new one")
             stop()
         }
 
@@ -89,7 +95,11 @@ class RawAudioPlayer {
                 for (i in 0 until extractor.trackCount) {
                     val f = extractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
+                    if (mime.startsWith("audio/")) { 
+                        audioTrackIndex = i
+                        format = f
+                        break 
+                    }
                 }
                 if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
@@ -98,11 +108,14 @@ class RawAudioPlayer {
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
+                // CRITICAL FIX: Assign to class-level variables
+                currentExtractor = extractor
                 currentSampleRate = actualSampleRate
 
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
                 codec.start()
+                currentCodec = codec
 
                 val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
                 audioTrack = AudioTrack.Builder()
@@ -112,10 +125,12 @@ class RawAudioPlayer {
                 audioTrack?.play()
 
                 val bufferInfo = MediaCodec.BufferInfo()
-                var sawInputEOS = false; var sawOutputEOS = false
+                var sawInputEOS = false
+                var sawOutputEOS = false
 
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
+                    
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -148,11 +163,16 @@ class RawAudioPlayer {
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
-                            if (!isPaused) audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+
+                            if (!isPaused) {
+                                audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            }
                         }
                         codec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
-                    } else if (isPaused) { Thread.sleep(20) }
+                    } else if (isPaused) { 
+                        Thread.sleep(20) 
+                    }
                 }
                 Handler(Looper.getMainLooper()).post { onSuccess() }
             } catch (e: Exception) {
@@ -172,13 +192,20 @@ class RawAudioPlayer {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
             var swing = (sin(lfoPhase) + 1.0f) / 2.0f
+            
             if (currentPreset == PanPreset.VOL_GENTLE) swing = (swing - 0.5f) * 0.4f + 0.5f
             if (currentPreset == PanPreset.VOL_CHOP) swing = if (swing > 0.5f) 1f else 0f
-            val outL = sampleL * (1.0f - (swing * depth)); val outR = sampleR * (swing * depth)
+
+            val leftGain = 1.0f - (swing * depth)
+            val rightGain = swing * depth
+            val outL = sampleL * leftGain
+            val outR = sampleR * rightGain
+            
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
@@ -207,10 +234,12 @@ class RawAudioPlayer {
                 val swapL = lowL * (1f - swing) + highL * swing; val swapR = highR * (1f - swing) + lowR * swing
                 outL = sampleL + depth * (swapL - sampleL); outR = sampleR + depth * (swapR - sampleR)
             }
+
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
@@ -222,78 +251,97 @@ class RawAudioPlayer {
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
             var lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
             if (currentPreset == PanPreset.TREMOLO_SQUARE) lfoVal = if (lfoVal > 0.5f) 1f else 0f
+            
             val gain = 0.3f + (0.7f * lfoVal * depth)
             val outL = sampleL * gain; val outR = sampleR * gain
+            
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
 
     private fun applyLoFi(bytes: ByteArray, size: Int, lfoStep: Float) {
         var i = 0
+        val bits = if (currentPreset == PanPreset.LOFI_4BIT) 4 else 8
+        val levels = (1 shl bits).toFloat()
+        val reduction = 4
+        
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
-            val currentBits = 16f - (14f * depth * swing)
-            val safeBits = currentBits.coerceIn(2f, 16f)
-            val levels = (1 shl safeBits.toInt()).toFloat()
-            val reduction = (1 + (4 * lfoFreq * swing)).toInt().coerceIn(1, 8)
+            
             lofiCounter++
             if (lofiCounter >= reduction) {
                 lofiCounter = 0
                 lofiHoldL = (sampleL * levels).toInt().toFloat() / levels
                 lofiHoldR = (sampleR * levels).toInt().toFloat() / levels
             }
+            
             val alpha = 0.2f
             val smoothL = leftPrevLow + alpha * (lofiHoldL - leftPrevLow); leftPrevLow = smoothL
             val smoothR = rightPrevLow + alpha * (lofiHoldR - rightPrevLow); rightPrevLow = smoothR
+            
             val sL = (smoothL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (smoothR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
 
     private fun applyTelephone(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
         var i = 0
+        val baseHighCut = if (currentPreset == PanPreset.TEL_VINTAGE) 2500f else 3500f
+        val baseLowCut = 300f
+        
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
-            val baseHighCut = if (currentPreset == PanPreset.TEL_VINTAGE) 2500f else 3500f
-            val currentHighCut = baseHighCut + (4000f * depth * swing)
-            val currentLowCut = 300f + (1500f * depth * swing)
+            
+            val currentHighCut = baseHighCut + (4000f * depth * ((sin(lfoPhase) + 1.0f) / 2.0f))
+            val currentLowCut = baseLowCut + (1500f * depth * ((sin(lfoPhase) + 1.0f) / 2.0f))
+            
             val alphaLow = 1.0f - exp(-2.0f * PI.toFloat() * currentHighCut / sampleRate)
             val alphaHigh = exp(-2.0f * PI.toFloat() * currentLowCut / sampleRate)
+            
             val lpL = leftPrevLow + alphaLow * (sampleL - leftPrevLow); leftPrevLow = lpL
             val lpR = rightPrevLow + alphaLow * (sampleR - rightPrevLow); rightPrevLow = lpR
+            
             val hpL = alphaHigh * (leftPrevHigh + lpL - leftPrevInput); leftPrevHigh = hpL; leftPrevInput = lpL
             val hpR = alphaHigh * (rightPrevHigh + lpR - rightPrevInput); rightPrevHigh = hpR; rightPrevInput = lpR
-            val outL = sampleL + depth * (hpL - sampleL); val outR = sampleR + depth * (hpR - sampleR)
+            
+            val outL = sampleL + depth * (hpL - sampleL)
+            val outR = sampleR + depth * (hpR - sampleR)
+            
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
 
     // --- LIFECYCLE ---
     fun seekTo(timeMs: Long) {
-        // Kept for safety, though restarting via playUri is now our primary seek method
         val ext = currentExtractor ?: return
         val cod = currentCodec ?: return
         val track = audioTrack ?: return
+
         try {
             ext.seekTo(timeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-            cod.flush(); track.flush()
-            lfoPhase = 0.0f; leftPrevLow = 0.0f; rightPrevLow = 0.0f
-        } catch (e: Exception) { Log.e(TAG, "Seek failed", e) }
+            cod.flush()
+            track.flush()
+            lfoPhase = 0.0f
+            leftPrevLow = 0.0f; rightPrevLow = 0.0f
+        } catch (e: Exception) {
+            Log.e(TAG, "Seek failed", e)
+        }
     }
 
     fun refreshAudioTrack() {
@@ -307,7 +355,9 @@ class RawAudioPlayer {
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
             audioTrack = newTrack
             newTrack.play()
-        } else if (track != null) { track.play() }
+        } else if (track != null) {
+            track.play()
+        }
     }
 
     fun pause() { isPaused = true; audioTrack?.pause() }
@@ -317,6 +367,7 @@ class RawAudioPlayer {
     fun stop() {
         if (Thread.currentThread() == playbackThread) { isPlaying = false; return }
         if (!isPlaying && playbackThread == null && audioTrack == null) return
+        
         isPlaying = false
         val thread = playbackThread
         if (thread != null) {
@@ -324,6 +375,9 @@ class RawAudioPlayer {
             try { thread.join(1000) } catch (_: InterruptedException) {}
         }
         playbackThread = null
+        
         audioTrack?.stop(); audioTrack?.release(); audioTrack = null
+        currentExtractor = null
+        currentCodec = null
     }
 }
