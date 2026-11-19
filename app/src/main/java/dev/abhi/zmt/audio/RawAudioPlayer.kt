@@ -25,29 +25,31 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
+    // Filter state for Frequency Pan
     private var leftPrevSample = 0.0f
     private var rightPrevSample = 0.0f
-    private var leftPrevSample2 = 0.0f
-    private var rightPrevSample2 = 0.0f
+    private var leftPrevInput = 0.0f  // Needed for Highpass filter
+    private var rightPrevInput = 0.0f // Needed for Highpass filter
 
     private var isPlaying = false
     private var isPaused = false
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
-    
-    // Class-level phase to persist smoothly across audio chunks
     private var lfoPhase = 0.0f
 
     fun playUri(context: Context, uri: Uri, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        if (isPlaying) stop()
+        stop() // Safely stop any previous playback
         isPlaying = true
         isPaused = false
-        lfoPhase = 0.0f // Reset phase for new track
+        lfoPhase = 0.0f
 
         playbackThread = Thread {
-            val extractor = MediaExtractor()
+            var extractor: MediaExtractor? = null
+            var codec: MediaCodec? = null
+            
             try {
                 Log.d(TAG, "Starting playback for URI: $uri")
+                extractor = MediaExtractor()
                 extractor.setDataSource(context, uri, null)
 
                 var audioTrackIndex = -1
@@ -73,7 +75,7 @@ class RawAudioPlayer {
 
                 Log.d(TAG, "Found audio track: $mime, SR: $actualSampleRate, Ch: $channelCount")
 
-                val codec = MediaCodec.createDecoderByType(mime)
+                codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
                 codec.start()
 
@@ -108,6 +110,8 @@ class RawAudioPlayer {
                 var sawOutputEOS = false
 
                 while (isPlaying && !sawOutputEOS) {
+                    if (Thread.currentThread().isInterrupted) break
+
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -135,12 +139,14 @@ class RawAudioPlayer {
                             val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
                             when (currentMode) {
-                                PanMode.OFF -> { /* pass-through, do nothing */ }
+                                PanMode.OFF -> { /* pass-through */ }
                                 PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep)
                                 PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
 
-                            audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            if (!isPaused) {
+                                audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            }
                         }
 
                         codec.releaseOutputBuffer(outputBufferIndex, false)
@@ -155,11 +161,15 @@ class RawAudioPlayer {
                 Handler(Looper.getMainLooper()).post { onSuccess() }
 
             } catch (e: Exception) {
-                e.printStackTrace()
-                Log.e(TAG, "Playback error", e)
-                Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+                if (isPlaying) {
+                    e.printStackTrace()
+                    Log.e(TAG, "Playback error", e)
+                    Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+                }
             } finally {
-                stop()
+                try { codec?.stop(); codec?.release() } catch (_: Exception) {}
+                try { extractor?.release() } catch (_: Exception) {}
+                // Do NOT call stop() here, let the main thread handle lifecycle safely
             }
         }
         playbackThread?.start()
@@ -198,8 +208,9 @@ class RawAudioPlayer {
     }
 
     private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
-        val minCutoff = 40f
-        val maxCutoff = 16000f
+        // Sweeps between 200Hz and 4000Hz for a noticeable split
+        val minCutoff = 200f
+        val maxCutoff = 4000f
         var i = 0
 
         while (i < size - 3) {
@@ -212,24 +223,25 @@ class RawAudioPlayer {
             val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
             val swing = (sin(lfoPhase) + 1.0f) / 2.0f
-            val leftCutoff = minCutoff + (maxCutoff - minCutoff) * swing
-            val rightCutoff = maxCutoff - (maxCutoff - minCutoff) * swing
+            val cutoff = minCutoff + (maxCutoff - minCutoff) * swing
 
-            val alphaL = 1.0f - exp(-2.0f * PI.toFloat() * leftCutoff / sampleRate)
-            val alphaR = 1.0f - exp(-2.0f * PI.toFloat() * rightCutoff / sampleRate)
+            // Alpha for 1-pole filters
+            val alpha = 1.0f - exp(-2.0f * PI.toFloat() * cutoff / sampleRate)
 
-            val tempL1 = leftPrevSample + alphaL * (sampleL - leftPrevSample)
-            val tempR1 = rightPrevSample + alphaR * (sampleR - rightPrevSample)
-            leftPrevSample = tempL1
-            rightPrevSample = tempR1
+            // LEFT EAR: Lowpass Filter (Keeps Bass, Cuts Treble)
+            // y[n] = y[n-1] + alpha * (x[n] - y[n-1])
+            val lowL = leftPrevSample + alpha * (sampleL - leftPrevSample)
+            leftPrevSample = lowL
 
-            val tempL2 = leftPrevSample2 + alphaL * (tempL1 - leftPrevSample2)
-            val tempR2 = rightPrevSample2 + alphaR * (tempR1 - rightPrevSample2)
-            leftPrevSample2 = tempL2
-            rightPrevSample2 = tempR2
+            // RIGHT EAR: Highpass Filter (Keeps Treble, Cuts Bass)
+            // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+            val highR = alpha * (rightPrevSample + sampleR - rightPrevInput)
+            rightPrevSample = highR
+            rightPrevInput = sampleR
 
-            val outL = sampleL + depth * (tempL2 - sampleL)
-            val outR = sampleR + depth * (tempR2 - sampleR)
+            // Mix dry/wet based on depth
+            val outL = sampleL + depth * (lowL - sampleL)
+            val outR = sampleR + depth * (highR - sampleR)
 
             val shortL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (shortL.toInt() and 0xFF).toByte()
@@ -255,13 +267,30 @@ class RawAudioPlayer {
         audioTrack?.play()
     }
 
+    @Synchronized
     fun stop() {
+        if (!isPlaying && playbackThread == null && audioTrack == null) return
+        
         isPlaying = false
-        playbackThread?.interrupt()
+        val thread = playbackThread
+        if (thread != null) {
+            thread.interrupt()
+            try {
+                thread.join(2000) // CRITICAL: Wait for thread to finish before releasing resources
+            } catch (_: InterruptedException) {}
+        }
         playbackThread = null
+        
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
-        Log.d(TAG, "RawAudioPlayer stopped and released")
+        
+        // Reset filter states
+        leftPrevSample = 0.0f
+        rightPrevSample = 0.0f
+        leftPrevInput = 0.0f
+        rightPrevInput = 0.0f
+        
+        Log.d(TAG, "RawAudioPlayer stopped and released safely")
     }
 }
