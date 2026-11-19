@@ -98,10 +98,11 @@ import androidx.compose.foundation.border
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DmtScreen(
-    state: DmtState,
-    dispatch: (DmtAction) -> Unit,
-    art: suspend (Track) -> Bitmap,
-) {
+        state: DmtState,
+        dispatch: (DmtAction) -> Unit,
+        art: suspend (Track) -> Bitmap,
+        rawPlayer: RawAudioPlayer? = null,
+    ) {
     var showQueueSheet by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
     var miniAnchor by remember { mutableStateOf<Rect?>(null) }
