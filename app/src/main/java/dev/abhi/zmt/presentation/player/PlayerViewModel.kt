@@ -1124,18 +1124,19 @@ class PlayerViewModel @Inject constructor(
         }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            if (reason == Player.DISCONTINUITY_REASON_SEEK && controller?.isPlaying == true) {
-                val uri = currentTrackUri
-                if (uri != null) {
-                    // This will now trigger the instant "seekTo" instead of a full restart!
-                    rawPlayer.playUri(context, uri, newPosition.positionMs,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
-                        onSuccess = { }
-                    )
-                    controller?.volume = 0f
-                }
-            }
+    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+        val uri = currentTrackUri
+        if (uri != null && controller?.isPlaying == true) {
+            android.util.Log.d("RawAudioPlayer", "Seek detected. Restarting player at ${newPosition.positionMs}ms")
+            // This triggers the safe stop() and fresh start inside playUri!
+            rawPlayer.playUri(context, uri, newPosition.positionMs,
+                onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
+                onSuccess = { }
+            )
+            controller?.volume = 0f
         }
+    }
+ }
         
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             controller?.let { c ->
