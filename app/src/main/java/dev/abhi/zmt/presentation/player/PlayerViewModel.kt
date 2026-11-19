@@ -1065,40 +1065,25 @@ class PlayerViewModel @Inject constructor(
 
     private var lastPlayedTrackId: String? = null
     private var currentTrackUri: Uri? = null
+
+    private var lastPlayUriTime = 0L
+    private var lastPlayUriString = ""
     
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // CRITICAL FIX: Mute ExoPlayer IMMEDIATELY before doing anything else
-            controller?.volume = 0f 
-
             reduce {
-                it.withNowPlaying(controller).copy(
-                    showDownloadSheet = false,
-                    lyrics = null,
-                    fault = null,
-                    error = null,
-                )
+                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
-            
-            loadCover(mediaItem)
-            loadTech(mediaItem)
-            loadLyrics(mediaItem)
-            loadLiked(mediaItem)
+            loadCover(mediaItem); loadTech(mediaItem); loadLyrics(mediaItem); loadLiked(mediaItem)
             
             val id = mediaItem?.mediaId
             val uri = mediaItem?.localConfiguration?.uri
             
-            if (id != null && uri != null) {
-                val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
-                    ?: currentState.tracks.find { it.id.toString() == id }
-                
-                if (track != null) {
-                    reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    rawPlayer.playUri(context, uri, 0L,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
-                        onSuccess = { }
-                    )
-                }
+            // FIX: Only start DSP if ExoPlayer is actually playing. Prevents auto-play on launch.
+            if (id != null && uri != null && controller?.isPlaying == true) {
+                triggerDspPlay(uri, 0L)
+            } else {
+                rawPlayer.stop()
             }
         }
         
@@ -1109,27 +1094,22 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                // CRITICAL FIX: Ensure ExoPlayer stays muted when playback resumes
-                controller?.volume = 0f 
-                
-                rawPlayer.refreshAudioTrack()
-                rawPlayer.resume()
+                val uri = currentTrackUri
+                if (uri != null) {
+                    // When resuming, sync to current position
+                    triggerDspPlay(uri, controller?.currentPosition ?: 0L)
+                }
             } else {
                 rawPlayer.pause()
             }
         }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                // CRITICAL FIX: Mute during seek to prevent audio bleed
-                controller?.volume = 0f 
-                
+            // FIX: Only seek if actually playing.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK && controller?.isPlaying == true) {
                 val uri = currentTrackUri
                 if (uri != null) {
-                    rawPlayer.playUri(context, uri, newPosition.positionMs,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
-                        onSuccess = { }
-                    )
+                    triggerDspPlay(uri, newPosition.positionMs)
                 }
             }
         }
@@ -1230,6 +1210,26 @@ class PlayerViewModel @Inject constructor(
             reduce { it.copy(fault = message) }
         }
     } // <-- THIS BRACE CLOSES THE LISTENER OBJECT. DO NOT DELETE IT.
+
+    private fun triggerDspPlay(uri: Uri, timeMs: Long) {
+            val now = System.currentTimeMillis()
+            val uriStr = uri.toString()
+            
+            // If we played this exact URI at this exact time in the last 500ms, IGNORE IT.
+            if (uriStr == lastPlayUriString && Math.abs(timeMs - lastPlayUriTime) < 500 && now - lastPlayUriTime < 500) {
+                return
+            }
+            
+            lastPlayUriString = uriStr
+            lastPlayUriTime = timeMs
+            
+            rawPlayer.playUri(context, uri, timeMs,
+                onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
+                onSuccess = { }
+            )
+            controller?.volume = 0f
+    }
+    
     private fun DmtState.withNowPlaying(c: MediaController?): DmtState {
         if (c == null) return this
         val meta = c.mediaMetadata
