@@ -1,7 +1,5 @@
 package dev.abhi.zmt.presentation.settings
 
-import android.widget.Toast
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -35,19 +33,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.R
-import dev.abhi.zmt.audio.RawAudioPlayer // <-- ADDED IMPORT
+import dev.abhi.zmt.audio.RawAudioPlayer
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
 import dev.abhi.zmt.domain.model.AccentColor
 import dev.abhi.zmt.domain.model.CrossfadeDuration
 import dev.abhi.zmt.domain.model.SleepFade
-import dev.abhi.zmt.presentation.player.EQ_PRESETS
 import dev.abhi.zmt.domain.model.DmtSettings
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.presentation.player.DmtAction
 import dev.abhi.zmt.presentation.player.DmtState
 import dev.abhi.zmt.presentation.player.DmtView
+import dev.abhi.zmt.presentation.player.EQ_PRESETS
 import dev.abhi.zmt.ui.theme.TuiAccent
 import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiFaint
@@ -62,9 +60,9 @@ fun nextCoverCols(current: Int): Int =
 
 @Composable
 fun SettingsPane(
-    state: DmtState, 
+    state: DmtState,
     dispatch: (DmtAction) -> Unit,
-    rawPlayer: RawAudioPlayer? = null // <-- ADDED PARAMETER
+    rawPlayer: RawAudioPlayer? = null
 ) {
     val settings = state.settings
     val on = stringResource(R.string.on)
@@ -144,68 +142,31 @@ fun SettingsPane(
         AccentRow(settings = settings, dispatch = dispatch)
 
         // ==========================================
-        // --- NEW: PingPong DSP Section ---
+        // --- PingPong DSP Section ---
         // ==========================================
         Caption("pingpong dsp")
         
-        // Use a local state variable so the UI updates instantly when clicked
         var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
-        
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
             RawAudioPlayer.PanMode.VOLUME -> "volume"
             RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
         }
 
-        val context = LocalContext.current // Add this at the top of the Composable if not there
-
         SettingRow(
             label = "dsp mode",
             value = modeLabel,
         ) {
-            rawPlayer?.let {
-                it.currentMode = when (it.currentMode) {
+            rawPlayer?.let { player ->
+                player.currentMode = when (player.currentMode) {
                     RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
                     RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
                     RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
                 }
-
-                // --- NEW: PRESET SELECTOR ---
-        val presetLabel = when (rawPlayer?.currentPreset) {
-            RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
-            RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
-            RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
-            RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> "helicopter"
-            RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> "deep bass"
-            RawAudioPlayer.PanPreset.FREQ_HI_HATS -> "hi-hats"
-            else -> "unknown"
-        }
-
-        SettingRow(
-            label = "dsp preset",
-            value = presetLabel,
-    ) {
-        rawPlayer?.let { player ->
-            // Cycle through presets based on the current mode
-            player.currentPreset = when (player.currentMode) {
-                RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
-                    RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
-                    RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
-                    RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                    else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                }
-                RawAudioPlayer.PanMode.FREQUENCY -> when (player.currentPreset) {
-                    RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> RawAudioPlayer.PanPreset.FREQ_DEEP_BASS
-                    RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> RawAudioPlayer.PanPreset.FREQ_HI_HATS
-                    RawAudioPlayer.PanPreset.FREQ_HI_HATS -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
-                    else -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
-                }
-                RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+                currentMode = player.currentMode // Update local state for instant UI refresh
             }
         }
-    }
 
-        // Only show sliders if an effect is active
         if (currentMode != RawAudioPlayer.PanMode.OFF) {
             val speed = rawPlayer?.lfoFreq ?: 0.5f
             val depth = rawPlayer?.depth ?: 0.8f
@@ -216,7 +177,7 @@ fun SettingsPane(
                     value = speed,
                     min = 0.1f,
                     max = 2.0f,
-                    steps = 19, // Creates 20 discrete segments
+                    steps = 19,
                     onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed }
                 )
                 
@@ -227,7 +188,7 @@ fun SettingsPane(
                     value = depth,
                     min = 0.0f,
                     max = 1.0f,
-                    steps = 10, // Creates 11 discrete segments
+                    steps = 10,
                     onValueChange = { newDepth -> rawPlayer?.depth = newDepth }
                 )
             }
@@ -343,50 +304,6 @@ fun SettingsPane(
     }
 }
 
-// ==========================================
-// Custom ASCII Slider Component
-// ==========================================
-@Composable
-fun AsciiSlider(
-    value: Float,
-    min: Float,
-    max: Float,
-    steps: Int,
-    onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
-    val filled = (percentage * steps).toInt()
-    val empty = steps - filled
-    
-    val filledChar = "█"
-    val emptyChar = "░"
-    val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = min..max,
-            steps = steps - 1,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = TuiAccent,
-                activeTrackColor = TuiAccent,
-                inactiveTrackColor = TuiLine
-            )
-        )
-        Text(
-            text = "$barText  ${String.format("%.1f", value)}",
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            color = TuiDim,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-    }
-}
-// ==========================================
-
 @Composable
 fun AccentRow(settings: DmtSettings, dispatch: (DmtAction) -> Unit) {
     var preview by remember(settings.accent) { mutableStateOf(settings.accent) }
@@ -449,5 +366,45 @@ fun SettingRow(
             )
         }
         HorizontalDivider(color = TuiLine)
+    }
+}
+
+@Composable
+fun AsciiSlider(
+    value: Float,
+    min: Float,
+    max: Float,
+    steps: Int,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
+    val filled = (percentage * steps).toInt()
+    val empty = steps - filled
+    
+    val filledChar = "█"
+    val emptyChar = "░"
+    val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = min..max,
+            steps = steps - 1,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = TuiAccent,
+                activeTrackColor = TuiAccent,
+                inactiveTrackColor = TuiLine
+            )
+        )
+        Text(
+            text = "$barText  ${String.format("%.1f", value)}",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = TuiDim,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
