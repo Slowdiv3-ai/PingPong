@@ -37,9 +37,6 @@ import dev.abhi.zmt.audio.RawAudioPlayer
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
-import dev.abhi.zmt.domain.model.AccentColor
-import dev.abhi.zmt.domain.model.CrossfadeDuration
-import dev.abhi.zmt.domain.model.SleepFade
 import dev.abhi.zmt.domain.model.DmtSettings
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.presentation.player.DmtAction
@@ -47,105 +44,46 @@ import dev.abhi.zmt.presentation.player.DmtState
 import dev.abhi.zmt.presentation.player.DmtView
 import dev.abhi.zmt.presentation.player.EQ_PRESETS
 import dev.abhi.zmt.ui.theme.TuiAccent
+import dev.abhi.zmt.ui.theme.TuiBg
 import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiFaint
 import dev.abhi.zmt.ui.theme.TuiFg
 import dev.abhi.zmt.ui.theme.TuiLine
+import dev.abhi.zmt.ui.theme.TuiRaised
 import dev.abhi.zmt.ui.theme.toColor
 
 private val COVER_COLS_STEPS = listOf(48, 64, 80, 96)
-
-fun nextCoverCols(current: Int): Int =
-    COVER_COLS_STEPS[(COVER_COLS_STEPS.indexOf(current) + 1).mod(COVER_COLS_STEPS.size)]
+fun nextCoverCols(current: Int): Int = COVER_COLS_STEPS[(COVER_COLS_STEPS.indexOf(current) + 1).mod(COVER_COLS_STEPS.size)]
 
 @Composable
-fun SettingsPane(
-    state: DmtState,
-    dispatch: (DmtAction) -> Unit,
-    rawPlayer: RawAudioPlayer? = null
-) {
+fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawAudioPlayer? = null) {
     val settings = state.settings
     val on = stringResource(R.string.on)
     val off = stringResource(R.string.off)
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Caption(stringResource(R.string.section_playback))
-
-        SettingRow(
-            label = stringResource(R.string.set_crossfade),
-            value = settings.crossfadeDuration.label,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(crossfadeDuration = settings.crossfadeDuration.next())))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_gapless),
-            value = if (settings.gapless) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(gapless = !settings.gapless)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_normalize),
-            value = if (settings.normalizeVolume) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(normalizeVolume = !settings.normalizeVolume)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_stop_on_dismiss),
-            value = if (settings.stopOnDismiss) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(stopOnDismiss = !settings.stopOnDismiss)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_sleep_fade),
-            value = settings.sleepFade.label,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(sleepFade = settings.sleepFade.next())))
-        }
+        SettingRow(label = stringResource(R.string.set_crossfade), value = settings.crossfadeDuration.label) { dispatch(DmtAction.Config(settings.copy(crossfadeDuration = settings.crossfadeDuration.next()))) }
+        SettingRow(label = stringResource(R.string.set_gapless), value = if (settings.gapless) on else off) { dispatch(DmtAction.Config(settings.copy(gapless = !settings.gapless))) }
+        SettingRow(label = stringResource(R.string.set_normalize), value = if (settings.normalizeVolume) on else off) { dispatch(DmtAction.Config(settings.copy(normalizeVolume = !settings.normalizeVolume))) }
+        SettingRow(label = stringResource(R.string.set_stop_on_dismiss), value = if (settings.stopOnDismiss) on else off) { dispatch(DmtAction.Config(settings.copy(stopOnDismiss = !settings.stopOnDismiss))) }
+        SettingRow(label = stringResource(R.string.set_sleep_fade), value = settings.sleepFade.label) { dispatch(DmtAction.Config(settings.copy(sleepFade = settings.sleepFade.next()))) }
 
         Caption(stringResource(R.string.section_lyrics))
-
-        SettingRow(
-            label = stringResource(R.string.set_lyrics_script),
-            value = stringResource(
-                if (settings.romanizedLyrics) R.string.lyrics_script_romanized else R.string.lyrics_script_original
-            ),
-        ) {
-            dispatch(DmtAction.Config(settings.copy(romanizedLyrics = !settings.romanizedLyrics)))
-        }
+        SettingRow(label = stringResource(R.string.set_lyrics_script), value = stringResource(if (settings.romanizedLyrics) R.string.lyrics_script_romanized else R.string.lyrics_script_original)) { dispatch(DmtAction.Config(settings.copy(romanizedLyrics = !settings.romanizedLyrics))) }
 
         Caption(stringResource(R.string.section_display))
-
-        SettingRow(
-            label = stringResource(R.string.set_wave),
-            value = if (settings.wave) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(wave = !settings.wave)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_detail),
-            value = pluralStringResource(R.plurals.set_detail_value, settings.cols, settings.cols),
-        ) {
-            dispatch(DmtAction.Config(settings.copy(cols = nextCoverCols(settings.cols))))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_raw),
-            value = if (settings.rawArt) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(rawArt = !settings.rawArt)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_specs),
-            value = if (settings.listSpecs) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(listSpecs = !settings.listSpecs)))
-        }
+        SettingRow(label = stringResource(R.string.set_wave), value = if (settings.wave) on else off) { dispatch(DmtAction.Config(settings.copy(wave = !settings.wave))) }
+        SettingRow(label = stringResource(R.string.set_detail), value = pluralStringResource(R.plurals.set_detail_value, settings.cols, settings.cols)) { dispatch(DmtAction.Config(settings.copy(cols = nextCoverCols(settings.cols)))) }
+        SettingRow(label = stringResource(R.string.set_raw), value = if (settings.rawArt) on else off) { dispatch(DmtAction.Config(settings.copy(rawArt = !settings.rawArt))) }
+        SettingRow(label = stringResource(R.string.set_specs), value = if (settings.listSpecs) on else off) { dispatch(DmtAction.Config(settings.copy(listSpecs = !settings.listSpecs))) }
         AccentRow(settings = settings, dispatch = dispatch)
 
         // ==========================================
         // --- PingPong DSP Section ---
         // ==========================================
         Caption("pingpong dsp")
-
+        
         val currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
@@ -153,10 +91,7 @@ fun SettingsPane(
             RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
         }
 
-        SettingRow(
-            label = "dsp mode",
-            value = modeLabel,
-        ) {
+        SettingRow(label = "dsp mode", value = modeLabel) {
             rawPlayer?.let { player ->
                 player.currentMode = when (player.currentMode) {
                     RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
@@ -166,7 +101,6 @@ fun SettingsPane(
             }
         }
 
-        // --- DSP PRESET BUTTON ---
         val presetLabel = when (rawPlayer?.currentPreset) {
             RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
             RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
@@ -177,10 +111,7 @@ fun SettingsPane(
             else -> "unknown"
         }
 
-        SettingRow(
-            label = "dsp preset",
-            value = presetLabel,
-        ) {
+        SettingRow(label = "dsp preset", value = presetLabel) {
             rawPlayer?.let { player ->
                 player.currentPreset = when (player.currentMode) {
                     RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
@@ -199,7 +130,6 @@ fun SettingsPane(
                 }
             }
         }
-        // ------------------------------
 
         if (currentMode != RawAudioPlayer.PanMode.OFF) {
             val speed = rawPlayer?.lfoFreq ?: 0.5f
@@ -207,133 +137,40 @@ fun SettingsPane(
 
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("lfo speed", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
-                AsciiSlider(
-                    value = speed,
-                    min = 0.1f,
-                    max = 2.0f,
-                    steps = 19,
-                    onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed }
-                )
-
+                AsciiSlider(value = speed, min = 0.1f, max = 2.0f, steps = 19, onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed })
                 Spacer(modifier = Modifier.height(12.dp))
-
                 Text("intensity", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
-                AsciiSlider(
-                    value = depth,
-                    min = 0.0f,
-                    max = 1.0f,
-                    steps = 10,
-                    onValueChange = { newDepth -> rawPlayer?.depth = newDepth }
-                )
+                AsciiSlider(value = depth, min = 0.0f, max = 1.0f, steps = 10, onValueChange = { newDepth -> rawPlayer?.depth = newDepth })
             }
         }
         // ==========================================
 
         Caption(stringResource(R.string.tools))
-        SettingRow(
-            label = stringResource(R.string.set_eq_preset),
-            value = state.equalizerPresetName,
-        ) {
-            val nextIndex = (state.equalizerPresetName.let { current ->
-                EQ_PRESETS.indexOfFirst { it.first == current }
-            } + 1).mod(EQ_PRESETS.size)
+        SettingRow(label = stringResource(R.string.set_eq_preset), value = state.equalizerPresetName) {
+            val nextIndex = (state.equalizerPresetName.let { current -> EQ_PRESETS.indexOfFirst { it.first == current } } + 1).mod(EQ_PRESETS.size)
             dispatch(DmtAction.SetEqualizerPreset(nextIndex))
         }
-        SettingRow(
-            label = stringResource(R.string.set_eq),
-            value = stringResource(R.string.set_eq_open),
-        ) {
-            dispatch(DmtAction.OpenEqualizer)
-        }
-        SettingRow(
-            label = stringResource(R.string.stats),
-            value = stringResource(R.string.stat_view),
-        ) {
-            dispatch(DmtAction.Show(DmtView.STATS))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_fingerprint_lock),
-            value = if (settings.fingerprintLock) on else off,
-        ) {
-            dispatch(DmtAction.Config(settings.copy(fingerprintLock = !settings.fingerprintLock)))
-        }
-        SettingRow(
-            label = stringResource(R.string.set_import_playlist),
-            value = stringResource(R.string.set_import_playlist_action),
-        ) {
-            dispatch(DmtAction.ShowImportDialog)
-        }
-        SettingRow(
-            label = stringResource(R.string.set_rescan),
-            value = stringResource(R.string.run),
-        ) {
-            dispatch(DmtAction.Rescan)
-        }
-        SettingRow(
-            label = stringResource(R.string.perms_title),
-            value = stringResource(R.string.perms_manage),
-        ) {
-            dispatch(DmtAction.Show(DmtView.PERMISSIONS))
-        }
+        SettingRow(label = stringResource(R.string.set_eq), value = stringResource(R.string.set_eq_open)) { dispatch(DmtAction.OpenEqualizer) }
+        SettingRow(label = stringResource(R.string.stats), value = stringResource(R.string.stat_view)) { dispatch(DmtAction.Show(DmtView.STATS)) }
+        SettingRow(label = stringResource(R.string.set_fingerprint_lock), value = if (settings.fingerprintLock) on else off) { dispatch(DmtAction.Config(settings.copy(fingerprintLock = !settings.fingerprintLock))) }
+        SettingRow(label = stringResource(R.string.set_import_playlist), value = stringResource(R.string.set_import_playlist_action)) { dispatch(DmtAction.ShowImportDialog) }
+        SettingRow(label = stringResource(R.string.set_rescan), value = stringResource(R.string.run)) { dispatch(DmtAction.Rescan) }
+        SettingRow(label = stringResource(R.string.perms_title), value = stringResource(R.string.perms_manage)) { dispatch(DmtAction.Show(DmtView.PERMISSIONS)) }
         if (settings.sourceMode == SourceMode.LOCAL) {
-            SettingRow(
-                label = stringResource(R.string.blocklist_title),
-                value = if (settings.blockedFolders.isEmpty()) {
-                    stringResource(R.string.blocklist_edit)
-                } else {
-                    pluralStringResource(
-                        R.plurals.blocklist_edit_count,
-                        settings.blockedFolders.size,
-                        settings.blockedFolders.size,
-                    )
-                },
-            ) {
-                dispatch(DmtAction.Show(DmtView.BLOCKLIST))
-            }
+            SettingRow(label = stringResource(R.string.blocklist_title), value = if (settings.blockedFolders.isEmpty()) stringResource(R.string.blocklist_edit) else pluralStringResource(R.plurals.blocklist_edit_count, settings.blockedFolders.size, settings.blockedFolders.size)) { dispatch(DmtAction.Show(DmtView.BLOCKLIST)) }
         }
 
         Caption(stringResource(R.string.about))
-        Text(
-            text = stringResource(R.string.about_title),
-            style = MaterialTheme.typography.bodyMedium,
-            color = TuiFg,
-        )
-        Text(
-            text = stringResource(R.string.about_body),
-            style = MaterialTheme.typography.labelSmall,
-            color = TuiDim,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Text(
-            text = "v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.labelSmall,
-            color = TuiFaint,
-            modifier = Modifier.padding(top = 6.dp),
-        )
+        Text(text = stringResource(R.string.about_title), style = MaterialTheme.typography.bodyMedium, color = TuiFg)
+        Text(text = stringResource(R.string.about_body), style = MaterialTheme.typography.labelSmall, color = TuiDim, modifier = Modifier.padding(top = 4.dp))
+        Text(text = "v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = TuiFaint, modifier = Modifier.padding(top = 6.dp))
 
         val uriHandler = LocalUriHandler.current
         val creditUrl = stringResource(R.string.credit_url)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .padding(top = 16.dp, bottom = 12.dp)
-                .tuiClickable { runCatching { uriHandler.openUri(creditUrl) } },
-        ) {
-            Text(
-                text = "▌ ",
-                style = MaterialTheme.typography.labelMedium,
-                color = TuiAccent,
-            )
-            Text(
-                text = stringResource(R.string.credit),
-                style = MaterialTheme.typography.labelMedium,
-                color = TuiDim,
-            )
-            Text(
-                text = " ↗",
-                style = MaterialTheme.typography.labelMedium,
-                color = TuiAccent,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp, bottom = 12.dp).tuiClickable { runCatching { uriHandler.openUri(creditUrl) } }) {
+            Text(text = "▌ ", style = MaterialTheme.typography.labelMedium, color = TuiAccent)
+            Text(text = stringResource(R.string.credit), style = MaterialTheme.typography.labelMedium, color = TuiDim)
+            Text(text = " ↗", style = MaterialTheme.typography.labelMedium, color = TuiAccent)
         }
     }
 }
@@ -342,33 +179,13 @@ fun SettingsPane(
 fun AccentRow(settings: DmtSettings, dispatch: (DmtAction) -> Unit) {
     var preview by remember(settings.accent) { mutableStateOf(settings.accent) }
     Column {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 5.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.set_accent),
-                style = MaterialTheme.typography.bodyLarge,
-                color = TuiFg,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+            Text(text = stringResource(R.string.set_accent), style = MaterialTheme.typography.bodyLarge, color = TuiFg)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(preview.toColor())
-                        .border(1.dp, TuiLine),
-                )
+                Box(modifier = Modifier.size(14.dp).background(preview.toColor()).border(1.dp, TuiLine))
                 Spacer(modifier = Modifier.width(6.dp))
                 TuiKey(label = "[ ${preview.label} ]") { preview = preview.next() }
-                if (preview != settings.accent) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    TuiKey(label = stringResource(R.string.accent_accept)) {
-                        dispatch(DmtAction.Config(settings.copy(accent = preview)))
-                    }
-                }
+                if (preview != settings.accent) { Spacer(modifier = Modifier.width(6.dp)); TuiKey(label = stringResource(R.string.accent_accept)) { dispatch(DmtAction.Config(settings.copy(accent = preview))) } }
             }
         }
         HorizontalDivider(color = TuiLine)
@@ -376,69 +193,27 @@ fun AccentRow(settings: DmtSettings, dispatch: (DmtAction) -> Unit) {
 }
 
 @Composable
-fun SettingRow(
-    label: String,
-    value: String,
-    onClick: () -> Unit,
-) {
+fun SettingRow(label: String, value: String, onClick: () -> Unit) {
     Column {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 5.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = TuiFg,
-            )
-            TuiKey(
-                label = "[ $value ]",
-                onClick = onClick,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+            Text(text = label, style = MaterialTheme.typography.bodyLarge, color = TuiFg)
+            TuiKey(label = "[ $value ]", onClick = onClick)
         }
         HorizontalDivider(color = TuiLine)
     }
 }
 
 @Composable
-fun AsciiSlider(
-    value: Float,
-    min: Float,
-    max: Float,
-    steps: Int,
-    onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun AsciiSlider(value: Float, min: Float, max: Float, steps: Int, onValueChange: (Float) -> Unit, modifier: Modifier = Modifier) {
     val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
     val filled = (percentage * steps).toInt()
     val empty = steps - filled
-
     val filledChar = "█"
     val emptyChar = "░"
     val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = min..max,
-            steps = steps - 1,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = TuiAccent,
-                activeTrackColor = TuiAccent,
-                inactiveTrackColor = TuiLine
-            )
-        )
-        Text(
-            text = "$barText  ${String.format("%.1f", value)}",
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            color = TuiDim,
-            modifier = Modifier.padding(top = 4.dp)
-        )
+        Slider(value = value, onValueChange = onValueChange, valueRange = min..max, steps = steps - 1, modifier = Modifier.fillMaxWidth(), colors = SliderDefaults.colors(thumbColor = TuiAccent, activeTrackColor = TuiAccent, inactiveTrackColor = TuiLine))
+        Text(text = "$barText  ${String.format("%.1f", value)}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = TuiDim, modifier = Modifier.padding(top = 4.dp))
     }
 }
