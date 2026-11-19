@@ -145,7 +145,7 @@ fun SettingsPane(
         // --- PingPong DSP Section ---
         // ==========================================
         Caption("pingpong dsp")
-        
+
         val currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
@@ -166,7 +166,7 @@ fun SettingsPane(
             }
         }
 
-        // --- NEW: DSP PRESET BUTTON ---
+        // --- DSP PRESET BUTTON ---
         val presetLabel = when (rawPlayer?.currentPreset) {
             RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
             RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
@@ -214,9 +214,9 @@ fun SettingsPane(
                     steps = 19,
                     onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed }
                 )
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
+
                 Text("intensity", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
                 AsciiSlider(
                     value = depth,
@@ -415,7 +415,7 @@ fun AsciiSlider(
     val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
     val filled = (percentage * steps).toInt()
     val empty = steps - filled
-    
+
     val filledChar = "█"
     val emptyChar = "░"
     val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
