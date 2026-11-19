@@ -34,7 +34,6 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
-    // Filter states
     private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
     private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
     private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
@@ -47,14 +46,13 @@ class RawAudioPlayer {
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
 
-    // --- THE FIX: Prevent ExoPlayer from spamming and creating two threads ---
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        // THREAD LOCK: If a thread is already running, stop it first
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Ignoring duplicate playUri call (Thread Lock)")
-            return
+            Log.d(TAG, "Stopping previous thread before starting new one")
+            stop()
         }
 
-        stop() // Safely kill any old thread
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
@@ -66,12 +64,12 @@ class RawAudioPlayer {
         playbackThread = Thread {
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
-            
+
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
-                
-                // FIX 1: Handle file:// URIs (from your screenshot)
+
+                // FIX: Handle file:// URIs
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
@@ -89,19 +87,28 @@ class RawAudioPlayer {
                 for (i in 0 until extractor.trackCount) {
                     val f = extractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
+                    if (mime.startsWith("audio/")) {
+                        audioTrackIndex = i
+                        format = f
+                        break
+                    }
                 }
-                if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
-                // FIX 2: Select track FIRST, then seek (Fixes the 0:00 bug)
+                if (audioTrackIndex == -1 || format == null) {
+                    throw Exception("No audio track found in file")
+                }
+
+                // 1. SELECT TRACK FIRST
                 extractor.selectTrack(audioTrackIndex)
-                if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                }
-
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+
+                // 2. SEEK AFTER SELECTING (This fixes the 0:00 bug!)
+                if (startTimeMs > 0) {
+                    Log.d(TAG, "Seeking to ${startTimeMs}ms")
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                }
 
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
@@ -151,16 +158,22 @@ class RawAudioPlayer {
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
-                            if (!isPaused) audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+
+                            if (!isPaused) {
+                                audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            }
                         }
                         codec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
-                    } else if (isPaused) { Thread.sleep(20) }
+                    } else if (isPaused) {
+                        Thread.sleep(20)
+                    }
                 }
                 Handler(Looper.getMainLooper()).post { onSuccess() }
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
+                // DO NOT call stop() here - it causes deadlock
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
@@ -291,7 +304,10 @@ class RawAudioPlayer {
 
     @Synchronized
     fun stop() {
-        if (Thread.currentThread() == playbackThread) { isPlaying = false; return }
+        if (Thread.currentThread() == playbackThread) {
+            isPlaying = false
+            return
+        }
         if (!isPlaying && playbackThread == null && audioTrack == null) return
         isPlaying = false
         playbackThread?.interrupt()
