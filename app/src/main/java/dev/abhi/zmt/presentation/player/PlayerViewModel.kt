@@ -1092,7 +1092,7 @@ class PlayerViewModel @Inject constructor(
                 
                 if (uriToPlay != null) {
                     try {
-                        rawPlayer.playUri(context, uriToPlay,
+                        rawPlayer.playUri(context, uriToPlay, 0L,
                             onError = { msg -> 
                                 android.util.Log.e("RawAudioPlayer", "Playback error: $msg")
                                 reduce { it.copy(error = "Audio Error: $msg") }
@@ -1127,6 +1127,28 @@ class PlayerViewModel @Inject constructor(
                 rawPlayer.resume()
             } else {
                 rawPlayer.pause()
+            }
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            // If the user manually seeks, restart RawAudioPlayer at the new position
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                val id = controller?.currentMediaItem?.mediaId
+                val track = if (id != null) {
+                    trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+                        ?: currentState.tracks.find { it.id.toString() == id }
+                } else null
+
+                if (track != null) {
+                    val uriToPlay = track.uri ?: controller?.currentMediaItem?.localConfiguration?.uri
+                    if (uriToPlay != null) {
+                        // Pass the new position (newPosition.positionMs) to the player!
+                        rawPlayer.playUri(context, uriToPlay, newPosition.positionMs,
+                            onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
+                            onSuccess = { }
+                        )
+                    }
+                }
             }
         }
 
