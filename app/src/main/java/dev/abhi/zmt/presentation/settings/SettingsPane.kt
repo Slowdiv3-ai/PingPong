@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -15,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,10 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.BuildConfig
 import dev.abhi.zmt.R
-import dev.abhi.zmt.audio.PanConfig
+import dev.abhi.zmt.audio.RawAudioPlayer // <-- ADDED IMPORT
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
@@ -55,16 +59,14 @@ fun nextCoverCols(current: Int): Int =
     COVER_COLS_STEPS[(COVER_COLS_STEPS.indexOf(current) + 1).mod(COVER_COLS_STEPS.size)]
 
 @Composable
-fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
+fun SettingsPane(
+    state: DmtState, 
+    dispatch: (DmtAction) -> Unit,
+    rawPlayer: RawAudioPlayer? = null // <-- ADDED PARAMETER
+) {
     val settings = state.settings
     val on = stringResource(R.string.on)
     val off = stringResource(R.string.off)
-
-    // --- PingPong DSP Local State ---
-    val freqOn = remember { mutableStateOf(PanConfig.isFreqPanEnabled) }
-    val volOn = remember { mutableStateOf(PanConfig.isVolPanEnabled) }
-    val presetName = remember { mutableStateOf(PanConfig.currentPreset.name.lowercase()) }
-    val speedVal = remember { mutableStateOf(PanConfig.speedMultiplier) }
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Caption(stringResource(R.string.section_playback))
@@ -73,11 +75,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             label = stringResource(R.string.set_crossfade),
             value = settings.crossfadeDuration.label,
         ) {
-            dispatch(
-                DmtAction.Config(
-                    settings.copy(crossfadeDuration = settings.crossfadeDuration.next()),
-                ),
-            )
+            dispatch(DmtAction.Config(settings.copy(crossfadeDuration = settings.crossfadeDuration.next())))
         }
         SettingRow(
             label = stringResource(R.string.set_gapless),
@@ -89,11 +87,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             label = stringResource(R.string.set_normalize),
             value = if (settings.normalizeVolume) on else off,
         ) {
-            dispatch(
-                DmtAction.Config(
-                    settings.copy(normalizeVolume = !settings.normalizeVolume),
-                ),
-            )
+            dispatch(DmtAction.Config(settings.copy(normalizeVolume = !settings.normalizeVolume)))
         }
         SettingRow(
             label = stringResource(R.string.set_stop_on_dismiss),
@@ -105,11 +99,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             label = stringResource(R.string.set_sleep_fade),
             value = settings.sleepFade.label,
         ) {
-            dispatch(
-                DmtAction.Config(
-                    settings.copy(sleepFade = settings.sleepFade.next()),
-                ),
-            )
+            dispatch(DmtAction.Config(settings.copy(sleepFade = settings.sleepFade.next())))
         }
 
         Caption(stringResource(R.string.section_lyrics))
@@ -117,18 +107,10 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
         SettingRow(
             label = stringResource(R.string.set_lyrics_script),
             value = stringResource(
-                if (settings.romanizedLyrics) {
-                    R.string.lyrics_script_romanized
-                } else {
-                    R.string.lyrics_script_original
-                },
+                if (settings.romanizedLyrics) R.string.lyrics_script_romanized else R.string.lyrics_script_original
             ),
         ) {
-            dispatch(
-                DmtAction.Config(
-                    settings.copy(romanizedLyrics = !settings.romanizedLyrics),
-                ),
-            )
+            dispatch(DmtAction.Config(settings.copy(romanizedLyrics = !settings.romanizedLyrics)))
         }
 
         Caption(stringResource(R.string.section_display))
@@ -159,45 +141,60 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
         }
         AccentRow(settings = settings, dispatch = dispatch)
 
+        // ==========================================
         // --- NEW: PingPong DSP Section ---
+        // ==========================================
         Caption("pingpong dsp")
-        SettingRow(
-            label = "frequency pan",
-            value = if (freqOn.value) "on" else "off",
-        ) {
-            freqOn.value = !freqOn.value
-            PanConfig.isFreqPanEnabled = freqOn.value
+        
+        val currentMode = rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF
+        val modeLabel = when (currentMode) {
+            RawAudioPlayer.PanMode.OFF -> "off"
+            RawAudioPlayer.PanMode.VOLUME -> "volume"
+            RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
         }
+
         SettingRow(
-            label = "volume pan",
-            value = if (volOn.value) "on" else "off",
+            label = "dsp mode",
+            value = modeLabel,
         ) {
-            volOn.value = !volOn.value
-            PanConfig.isVolPanEnabled = volOn.value
-        }
-        SettingRow(
-            label = "pan preset",
-            value = presetName.value,
-        ) {
-            // FIXED: Cycle through SMOOTH -> WAVE -> SUBTLE -> SMOOTH
-            val next = when (PanConfig.currentPreset) {
-                PanConfig.Preset.SMOOTH -> PanConfig.Preset.WAVE
-                PanConfig.Preset.WAVE -> PanConfig.Preset.SUBTLE
-                PanConfig.Preset.SUBTLE -> PanConfig.Preset.SMOOTH
+            // Cycle mutually exclusively: OFF -> VOLUME -> FREQUENCY -> OFF
+            rawPlayer?.let {
+                it.currentMode = when (it.currentMode) {
+                    RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
+                    RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
+                    RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
+                }
             }
-            PanConfig.currentPreset = next
-            presetName.value = next.name.lowercase()
         }
-        SettingRow(
-            label = "pan speed",
-            value = "${speedVal.value}x",
-        ) {
-            val steps = listOf(0.5f, 1.0f, 1.5f, 2.0f, 3.0f)
-            val idx = (steps.indexOf(speedVal.value) + 1) % steps.size
-            speedVal.value = steps[idx]
-            PanConfig.speedMultiplier = steps[idx]
+
+        // Only show sliders if an effect is active
+        if (currentMode != RawAudioPlayer.PanMode.OFF) {
+            val speed = rawPlayer?.lfoFreq ?: 0.5f
+            val depth = rawPlayer?.depth ?: 0.8f
+
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text("lfo speed", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
+                AsciiSlider(
+                    value = speed,
+                    min = 0.1f,
+                    max = 2.0f,
+                    steps = 19, // Creates 20 discrete segments
+                    onValueChange = { newSpeed -> rawPlayer?.lfoFreq = newSpeed }
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Text("intensity", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
+                AsciiSlider(
+                    value = depth,
+                    min = 0.0f,
+                    max = 1.0f,
+                    steps = 10, // Creates 11 discrete segments
+                    onValueChange = { newDepth -> rawPlayer?.depth = newDepth }
+                )
+            }
         }
-        // ---------------------------------
+        // ==========================================
 
         Caption(stringResource(R.string.tools))
         SettingRow(
@@ -307,6 +304,50 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
         }
     }
 }
+
+// ==========================================
+// Custom ASCII Slider Component
+// ==========================================
+@Composable
+fun AsciiSlider(
+    value: Float,
+    min: Float,
+    max: Float,
+    steps: Int,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
+    val filled = (percentage * steps).toInt()
+    val empty = steps - filled
+    
+    val filledChar = "█"
+    val emptyChar = "░"
+    val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = min..max,
+            steps = steps - 1,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = TuiAccent,
+                activeTrackColor = TuiAccent,
+                inactiveTrackColor = TuiLine
+            )
+        )
+        Text(
+            text = "$barText  ${String.format("%.1f", value)}",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = TuiDim,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+// ==========================================
 
 @Composable
 fun AccentRow(settings: DmtSettings, dispatch: (DmtAction) -> Unit) {
