@@ -1206,8 +1206,7 @@ class PlayerViewModel @Inject constructor(
             }
             reduce { it.copy(fault = message) }
         }
-    }
-
+    } // <-- THIS BRACE CLOSES THE LISTENER OBJECT. DO NOT DELETE IT.
     private fun DmtState.withNowPlaying(c: MediaController?): DmtState {
         if (c == null) return this
         val meta = c.mediaMetadata
@@ -1570,12 +1569,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        controller.release()
-        controller = null
-    }
-}
-override fun onCleared() {
         controller?.release()
         controller = null
         rawPlayer.stop() // Clean up DSP player
-}
+    }
+} // <-- THIS IS THE FINAL CLOSING BRACE OF PLAYERVIEWMODEL
