@@ -139,8 +139,13 @@ class RawAudioPlayer {
 
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
+                        // ADD THIS LOG TO PROVE IT'S WORKING
+                        if (bufferInfo.size > 0) {
+                            android.util.Log.d("RawAudioPlayer", "Decoding chunk: ${bufferInfo.size} bytes")
+                        }
+                        
                         val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
-
+                        // ... rest of the code ...
                         if (bufferInfo.size > 0 && channelCount == 2 && outputBuffer != null) {
                             val bytes = ByteArray(bufferInfo.size)
                             outputBuffer.get(bytes)
@@ -168,8 +173,7 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
-                // CRITICAL FIX: DO NOT CALL stop() HERE. It causes a deadlock.
-                // Only release the codec and extractor.
+                // DO NOT CALL stop() HERE. It causes the crash.
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
