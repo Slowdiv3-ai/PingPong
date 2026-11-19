@@ -23,10 +23,15 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
 
-    // Volume Pan Parameters
+    // Frequency Pan Parameters
     private var lfoPhase = 0.0f
-    private val lfoFreq = 0.5f // Swaps left/right every 2 seconds
-    private val depth = 0.8f   // Pan intensity
+    private val lfoFreq = 0.25f // Slower sweep (4 seconds for full cycle)
+    private val minCutoff = 200f // Muffled sound
+    private val maxCutoff = 8000f // Bright sound
+    
+    // Filter state (1-pole lowpass filter)
+    private var leftPrevSample = 0.0f
+    private var rightPrevSample = 0.0f
 
     fun playUri(context: Context, uri: Uri, onError: (String) -> Unit, onSuccess: () -> Unit) {
         if (isPlaying) stop()
@@ -35,7 +40,7 @@ class RawAudioPlayer {
         playbackThread = Thread {
             val extractor = MediaExtractor()
             try {
-                Log.d(TAG, "Starting playback for URI: $uri")
+                Log.d(TAG, "Starting Frequency Pan playback for URI: $uri")
                 extractor.setDataSource(context, uri, null)
                 
                 var audioTrackIndex = -1
@@ -90,17 +95,18 @@ class RawAudioPlayer {
                     .build()
 
                 audioTrack?.play()
-                Log.d(TAG, "AudioTrack created and playing. Min buffer: $minBufferSize")
 
                 val bufferInfo = MediaCodec.BufferInfo()
                 var sawInputEOS = false
                 var sawOutputEOS = false
 
                 lfoPhase = 0.0f
+                leftPrevSample = 0.0f
+                rightPrevSample = 0.0f
+                // Calculate how much the phase changes per sample
                 val lfoStep = 2.0f * Math.PI.toFloat() * (lfoFreq / actualSampleRate)
 
                 while (isPlaying && !sawOutputEOS) {
-                    // 1. Feed data to decoder
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -117,20 +123,17 @@ class RawAudioPlayer {
                         }
                     }
 
-                    // 2. Get decoded data
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
                         
                         if (bufferInfo.size > 0 && channelCount == 2 && outputBuffer != null) {
-                            // FIX: Copy read-only buffer into a standard, writable byte array
                             val bytes = ByteArray(bufferInfo.size)
                             outputBuffer.get(bytes)
                             
-                            // Apply the math directly to the byte array
-                            applyVolumePan(bytes, bufferInfo.size, lfoStep)
+                            // Apply Frequency Pan math
+                            applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             
-                            // Write the byte array directly to the AudioTrack
                             audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                         }
 
@@ -139,8 +142,6 @@ class RawAudioPlayer {
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             sawOutputEOS = true
                         }
-                    } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        Log.d(TAG, "Output format changed")
                     }
                 }
 
@@ -158,10 +159,11 @@ class RawAudioPlayer {
         playbackThread?.start()
     }
 
-    private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
+    private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
         var i = 0
-        // Loop through the byte array, 4 bytes at a time (2 bytes for Left, 2 bytes for Right)
+        
         while (i < size - 3) { 
+            // 1. Read 16-bit Little Endian Stereo
             val b0 = bytes[i].toInt() and 0xFF
             val b1 = bytes[i + 1].toInt() and 0xFF
             val sampleL = (b0 or (b1 shl 8)).toShort() / 32768f
@@ -170,14 +172,30 @@ class RawAudioPlayer {
             val b3 = bytes[i + 3].toInt() and 0xFF
             val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
-            val pan = (sin(lfoPhase) + 1.0f) / 2.0f
-            val angle = pan * (Math.PI.toFloat() / 2.0f)
-            val leftGain = cos(angle)
-            val rightGain = sin(angle)
+            // 2. Calculate LFO (0.0 to 1.0)
+            val lfoValue = (sin(lfoPhase) + 1.0f) / 2.0f
+            
+            // 3. Calculate Cutoff Frequencies (Left sweeps up, Right sweeps down)
+            val leftCutoff = minCutoff + (maxCutoff - minCutoff) * lfoValue
+            val rightCutoff = maxCutoff - (maxCutoff - minCutoff) * lfoValue
 
-            val outL = (sampleL * leftGain * depth).coerceIn(-1f, 1f)
-            val outR = (sampleR * rightGain * depth).coerceIn(-1f, 1f)
+            // 4. Calculate filter coefficients (1-pole lowpass)
+            val alphaL = 1.0f - exp(-2.0f * PI.toFloat() * leftCutoff / sampleRate)
+            val alphaR = 1.0f - exp(-2.0f * PI.toFloat() * rightCutoff / sampleRate)
 
+            // 5. Apply filter
+            var outL = leftPrevSample + alphaL * (sampleL - leftPrevSample)
+            var outR = rightPrevSample + alphaR * (sampleR - rightPrevSample)
+
+            // Save state for next sample
+            leftPrevSample = outL
+            rightPrevSample = outR
+
+            // Prevent clipping
+            outL = outL.coerceIn(-1f, 1f)
+            outR = outR.coerceIn(-1f, 1f)
+
+            // 6. Write back 16-bit Little Endian
             val shortL = (outL * 32767f).toInt().toShort()
             bytes[i] = (shortL.toInt() and 0xFF).toByte()
             bytes[i + 1] = (shortL.toInt() shr 8).toByte()
@@ -199,6 +217,5 @@ class RawAudioPlayer {
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
-        Log.d(TAG, "RawAudioPlayer stopped and released")
     }
 }
