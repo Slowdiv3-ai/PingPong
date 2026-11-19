@@ -148,7 +148,9 @@ fun SettingsPane(
         // ==========================================
         Caption("pingpong dsp")
         
-        val currentMode = rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF
+        // Use a local state variable so the UI updates instantly when clicked
+        var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
+        
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
             RawAudioPlayer.PanMode.VOLUME -> "volume"
