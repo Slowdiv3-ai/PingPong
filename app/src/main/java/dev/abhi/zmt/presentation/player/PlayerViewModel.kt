@@ -1127,9 +1127,12 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // If the user manually seeks, force RawAudioPlayer to jump to the exact same spot
+            // When the user manually seeks, sync our RawAudioPlayer to the new timestamp
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                android.util.Log.d("RawAudioPlayer", "Seek detected, syncing to ${newPosition.positionMs}ms")
                 rawPlayer.seekTo(newPosition.positionMs)
+                // Force resume to ensure it doesn't get stuck in a paused state after the seek
+                rawPlayer.resume()
             }
         }
 
