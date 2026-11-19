@@ -34,6 +34,7 @@ class RawAudioPlayer {
     private var rightPrevSample2 = 0.0f
 
     private var isPlaying = false
+    private var isPaused = false  
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
 
