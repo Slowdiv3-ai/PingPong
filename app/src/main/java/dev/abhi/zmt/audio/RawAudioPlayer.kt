@@ -80,7 +80,8 @@ class RawAudioPlayer {
                 
                 // CRITICAL FIX: Seek MUST happen AFTER selecting the track
                 if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    // PREVIOUS_SYNC prevents jumping forward to the next keyframe (fixes the 00:03 bug)
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 }
 
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
