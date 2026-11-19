@@ -45,16 +45,15 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
-
     private var currentSampleRate: Int = 44100
 
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        // THREAD LOCK: If a thread is already running, stop it first
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Stopping previous thread before starting new one")
-            stop()
+            Log.d(TAG, "Ignoring duplicate playUri call")
+            return
         }
 
+        stop()
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
@@ -66,54 +65,40 @@ class RawAudioPlayer {
         playbackThread = Thread {
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
-
+            
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
-
-                // FIX: Handle file:// URIs
+                
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
                         val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                        extractor.setDataSource(context, uri, null)
+                        extractor.setDataSource(fd.fileDescriptor)
+                    } else {
+                        throw Exception("File not found: ${uri.path}")
+                    }
+                } else {
+                    extractor.setDataSource(context, uri, null)
+                }
 
                 var audioTrackIndex = -1
                 var format: MediaFormat? = null
                 for (i in 0 until extractor.trackCount) {
                     val f = extractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) {
-                        audioTrackIndex = i
-                        format = f
-                        break
-                    }
+                    if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
                 }
+                if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
-                if (audioTrackIndex == -1 || format == null) {
-                    throw Exception("No audio track found in file")
-                }
-
-                // 1. SELECT TRACK FIRST
                 extractor.selectTrack(audioTrackIndex)
-                
-                // CRITICAL FIX: Seek MUST happen AFTER selecting the track
-                if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                }
-
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                // 2. SEEK AFTER SELECTING (This fixes the 0:00 bug!)
-                if (startTimeMs > 0) {
-                    // PREVIOUS_SYNC prevents jumping forward to the next keyframe (fixes the 00:03 bug)
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                }
+                currentSampleRate = actualSampleRate
 
                 codec = MediaCodec.createDecoderByType(mime)
-                currentSampleRate = actualSampleRate
                 codec.configure(format, null, null, 0)
                 codec.start()
 
@@ -161,28 +146,22 @@ class RawAudioPlayer {
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
-
-                            if (!isPaused) {
-                                audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
-                            }
+                            if (!isPaused) audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                         }
                         codec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
-                    } else if (isPaused) {
-                        Thread.sleep(20)
-                    }
+                    } else if (isPaused) { Thread.sleep(20) }
                 }
                 Handler(Looper.getMainLooper()).post { onSuccess() }
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
-                // DO NOT call stop() here - it causes deadlock
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
-        }
+        } // <--- THIS BRACE CLOSES THE THREAD LAMBDA
         playbackThread?.start()
-    }
+    } // <--- THIS BRACE CLOSES playUri
 
     // --- DSP EFFECTS ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
@@ -302,41 +281,35 @@ class RawAudioPlayer {
         }
     }
 
-    fun pause() { isPaused = true; audioTrack?.pause() }
-    fun resume() { isPaused = false; audioTrack?.play() }
+    // --- LIFECYCLE ---
+    fun seekTo(timeMs: Long) {
+        val track = audioTrack ?: return
+        try {
+            track.flush()
+            lfoPhase = 0.0f; leftPrevLow = 0.0f; rightPrevLow = 0.0f
+        } catch (e: Exception) { Log.e(TAG, "Seek failed", e) }
+    }
 
     fun refreshAudioTrack() {
         val track = audioTrack
         if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
-            try {
-                track.stop()
-                track.release()
-            } catch (_: Exception) {}
-
-            val minBufferSize = AudioTrack.getMinBufferSize(
-                currentSampleRate,
-                AudioFormat.CHANNEL_OUT_STEREO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
+            try { track.stop(); track.release() } catch (_: Exception) {}
+            val minBufferSize = AudioTrack.getMinBufferSize(currentSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
             val newTrack = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(minBufferSize * 4)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
+                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
             audioTrack = newTrack
             newTrack.play()
-        } else if (track != null) {
-            track.play()
-        }
+        } else if (track != null) { track.play() }
     }
+
+    fun pause() { isPaused = true; audioTrack?.pause() }
+    fun resume() { isPaused = false; audioTrack?.play() }
 
     @Synchronized
     fun stop() {
-        if (Thread.currentThread() == playbackThread) {
-            isPlaying = false
-            return
-        }
+        if (Thread.currentThread() == playbackThread) { isPlaying = false; return }
         if (!isPlaying && playbackThread == null && audioTrack == null) return
         isPlaying = false
         playbackThread?.interrupt()
@@ -344,4 +317,4 @@ class RawAudioPlayer {
         playbackThread = null
         audioTrack?.stop(); audioTrack?.release(); audioTrack = null
     }
-}
+} // <--- THIS BRACE CLOSES THE CLASS
