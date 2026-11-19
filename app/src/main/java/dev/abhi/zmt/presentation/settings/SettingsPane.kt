@@ -184,38 +184,26 @@ fun SettingsPane(
         SettingRow(
             label = "dsp preset",
             value = presetLabel,
-        ) {
-            rawPlayer?.let { player ->
-                // Cycle through presets based on the current mode
-                player.currentPreset = when (player.currentMode) {
-                    RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
-                        RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
-                        RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
-                        RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                        else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                    }
-                    RawAudioPlayer.PanMode.FREQUENCY -> when (player.currentPreset) {
-                        RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> RawAudioPlayer.PanPreset.FREQ_DEEP_BASS
-                        RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> RawAudioPlayer.PanPreset.FREQ_HI_HATS
-                        RawAudioPlayer.PanPreset.FREQ_HI_HATS -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
-                        else -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
-                    }
-                    RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+    ) {
+        rawPlayer?.let { player ->
+            // Cycle through presets based on the current mode
+            player.currentPreset = when (player.currentMode) {
+                RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
+                    RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
+                    RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
+                    RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+                    else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
                 }
+                RawAudioPlayer.PanMode.FREQUENCY -> when (player.currentPreset) {
+                    RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> RawAudioPlayer.PanPreset.FREQ_DEEP_BASS
+                    RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> RawAudioPlayer.PanPreset.FREQ_HI_HATS
+                    RawAudioPlayer.PanPreset.FREQ_HI_HATS -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
+                    else -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
+                }
+                RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
             }
         }
-        // --------------------------
-                // Update the local UI state so the text changes immediately!
-                currentMode = it.currentMode 
-                
-                val modeName = when (it.currentMode) {
-                    RawAudioPlayer.PanMode.OFF -> "OFF"
-                    RawAudioPlayer.PanMode.VOLUME -> "VOLUME PAN"
-                    RawAudioPlayer.PanMode.FREQUENCY -> "FREQUENCY PAN"
-                }
-                Toast.makeText(context, "DSP Mode: $modeName", Toast.LENGTH_SHORT).show()
-            }
-        }
+    }
 
         // Only show sliders if an effect is active
         if (currentMode != RawAudioPlayer.PanMode.OFF) {
