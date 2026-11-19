@@ -44,6 +44,7 @@ class RawAudioPlayer {
     private var currentCodec: MediaCodec? = null
     private var currentSampleRate: Int = 44100
 
+@Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
         if (isPlaying) stop()
         isPlaying = true
