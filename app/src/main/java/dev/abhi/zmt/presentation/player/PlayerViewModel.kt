@@ -1135,16 +1135,14 @@ class PlayerViewModel @Inject constructor(
         val uri = currentTrackUri
         if (uri != null) {
             android.util.Log.d("RawAudioPlayer", "Seeking to ${newPosition.positionMs}ms")
-            // CRITICAL: Stop the old thread FIRST before starting a new one
-            rawPlayer.stop()
-            // Now start fresh at the new position
+            // ACTUALLY restart the player at the new position
             rawPlayer.playUri(context, uri, newPosition.positionMs,
                 onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                 onSuccess = { }
             )
         }
     }
-        }
+}
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             controller?.let { c ->
                 val (queue, queuePosition) = c.queueWithPosition()
