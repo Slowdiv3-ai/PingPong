@@ -1074,27 +1074,32 @@ class PlayerViewModel @Inject constructor(
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
-            loadCover(mediaItem); loadTech(mediaItem); loadLyrics(mediaItem); loadLiked(mediaItem)
-            
+            loadCover(mediaItem)
+            loadTech(mediaItem)
+            loadLyrics(mediaItem)
+            loadLiked(mediaItem)
+
             val id = mediaItem?.mediaId
             val uri = mediaItem?.localConfiguration?.uri
             currentTrackUri = uri
 
-            // FIX: Start the DSP player immediately on track change. Don't check isPlaying yet.
-            if (id != null && uri != null) {
+            // FIX 1: ONLY start DSP if the player is ACTUALLY playing. 
+            // This completely prevents the last song from auto-playing on launch.
+            if (id != null && uri != null && controller?.isPlaying == true) {
                 val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
                     ?: currentState.tracks.find { it.id.toString() == id }
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    android.util.Log.d("RawAudioPlayer", "Track changed. Starting DSP for: $id")
-                    
-                    rawPlayer.playUri(context, uri, 0L,
+                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
                         onSuccess = { }
                     )
-                    controller?.volume = 0f 
+                    controller?.volume = 0f
                 }
+            } else {
+                // Ensure DSP is stopped if not playing
+                rawPlayer.stop()
             }
         }
         
@@ -1105,10 +1110,8 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                // FIX: When user hits play, sync the DSP player to the exact current position
                 val uri = currentTrackUri
                 if (uri != null) {
-                    rawPlayer.refreshAudioTrack()
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
                         onSuccess = { }
@@ -1121,11 +1124,10 @@ class PlayerViewModel @Inject constructor(
         }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // FIX: Seek immediately to the new position
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK && controller?.isPlaying == true) {
                 val uri = currentTrackUri
                 if (uri != null) {
-                    android.util.Log.d("RawAudioPlayer", "Seeking to ${newPosition.positionMs}ms")
+                    // This will now trigger the instant "seekTo" instead of a full restart!
                     rawPlayer.playUri(context, uri, newPosition.positionMs,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
