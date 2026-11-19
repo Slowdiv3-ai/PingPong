@@ -49,12 +49,22 @@ class RawAudioPlayer {
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
 
+    @Volatile private var isProcessing = false
+
     private var currentExtractor: MediaExtractor? = null
     private var currentCodec: MediaCodec? = null
     private var currentSampleRate: Int = 44100
 
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        stop()
+        // CRITICAL LOCK: If a thread is already running, ignore the spam from ExoPlayer
+        if (isProcessing) {
+            Log.d(TAG, "Ignoring duplicate playUri call")
+            return
+        }
+        isProcessing = true
+
+        // ... (rest of your existing code: stop(), isPlaying = true, etc.) ...
+    stop()
         isPlaying = true; isPaused = false; lfoPhase = 0.0f
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
@@ -147,6 +157,7 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
+                isProcessing = false
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
