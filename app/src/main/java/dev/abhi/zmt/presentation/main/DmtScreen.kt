@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.R
+import dev.abhi.zmt.audio.RawAudioPlayer // <--- ADDED IMPORT
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.FitScaled
 import dev.abhi.zmt.core.common.ScrollMemory
@@ -98,11 +99,11 @@ import androidx.compose.foundation.border
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DmtScreen(
-        state: DmtState,
-        dispatch: (DmtAction) -> Unit,
-        art: suspend (Track) -> Bitmap,
-        rawPlayer: RawAudioPlayer? = null,
-    ) {
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    art: suspend (Track) -> Bitmap,
+    rawPlayer: RawAudioPlayer? = null, // <--- ADDED PARAMETER
+) {
     var showQueueSheet by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
     var miniAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -175,7 +176,8 @@ fun DmtScreen(
                             dispatch = dispatch,
                             art = art,
                             modifier = Modifier.weight(1f),
-                                    )
+                            rawPlayer = rawPlayer, // <--- PASSED HERE
+                        )
 
                         TuiNotice(error = state.error, notice = state.notice)
 
@@ -200,7 +202,8 @@ fun DmtScreen(
                     dispatch = dispatch,
                     art = art,
                     modifier = Modifier.weight(1f),
-                    )
+                    rawPlayer = rawPlayer, // <--- PASSED HERE
+                )
 
                 TuiNotice(error = state.error, notice = state.notice)
 
@@ -354,6 +357,7 @@ private fun PaneHost(
     dispatch: (DmtAction) -> Unit,
     art: suspend (Track) -> Bitmap,
     modifier: Modifier = Modifier,
+    rawPlayer: RawAudioPlayer? = null, // <--- ADDED PARAMETER
 ) {
     Column(modifier = modifier) {
         ScrollMemory(state.view.name) {
@@ -382,7 +386,7 @@ private fun PaneHost(
                 state.view == DmtView.STATS -> StatsPane(state, dispatch)
                 state.view == DmtView.BLOCKLIST -> BlocklistPane(state, dispatch)
                 state.view == DmtView.PERMISSIONS -> PermissionsPane(state, dispatch)
-                state.view == DmtView.SETTINGS -> SettingsPane(state, dispatch)
+                state.view == DmtView.SETTINGS -> SettingsPane(state, dispatch, rawPlayer) // <--- PASSED HERE
                 state.view == DmtView.SOURCES -> SourcesPane(state, dispatch)
                 state.view == DmtView.SOURCE_LOGIN -> SourceLoginPane(mode = state.loginSource, state = state, dispatch = dispatch)
                 state.scanning && state.tracks.isEmpty() ->
