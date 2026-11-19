@@ -60,10 +60,6 @@ class RawAudioPlayer {
                 extractor = MediaExtractor()
                 extractor.setDataSource(context, uri, null)
 
-                if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                }
-
                 var audioTrackIndex = -1
                 var format: MediaFormat? = null
                 for (i in 0 until extractor.trackCount) {
@@ -81,6 +77,12 @@ class RawAudioPlayer {
                 }
 
                 extractor.selectTrack(audioTrackIndex)
+                
+                // CRITICAL FIX: Seek MUST happen AFTER selecting the track
+                if (startTimeMs > 0) {
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                }
+
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
