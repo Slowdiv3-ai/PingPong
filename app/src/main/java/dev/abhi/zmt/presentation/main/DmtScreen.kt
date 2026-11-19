@@ -47,7 +47,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.abhi.zmt.R
-import dev.abhi.zmt.audio.RawAudioPlayer // <--- ADDED IMPORT
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.FitScaled
 import dev.abhi.zmt.core.common.ScrollMemory
@@ -102,7 +101,6 @@ fun DmtScreen(
     state: DmtState,
     dispatch: (DmtAction) -> Unit,
     art: suspend (Track) -> Bitmap,
-    rawPlayer: RawAudioPlayer? = null, // <--- ADDED PARAMETER
 ) {
     var showQueueSheet by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
@@ -176,8 +174,7 @@ fun DmtScreen(
                             dispatch = dispatch,
                             art = art,
                             modifier = Modifier.weight(1f),
-                            rawPlayer = rawPlayer, // <--- PASSED HERE
-                        )
+                                    )
 
                         TuiNotice(error = state.error, notice = state.notice)
 
@@ -202,8 +199,7 @@ fun DmtScreen(
                     dispatch = dispatch,
                     art = art,
                     modifier = Modifier.weight(1f),
-                    rawPlayer = rawPlayer, // <--- PASSED HERE
-                )
+                    )
 
                 TuiNotice(error = state.error, notice = state.notice)
 
@@ -357,7 +353,6 @@ private fun PaneHost(
     dispatch: (DmtAction) -> Unit,
     art: suspend (Track) -> Bitmap,
     modifier: Modifier = Modifier,
-    rawPlayer: RawAudioPlayer? = null, // <--- ADDED PARAMETER
 ) {
     Column(modifier = modifier) {
         ScrollMemory(state.view.name) {
@@ -376,4 +371,178 @@ private fun PaneHost(
                         dispatch(DmtAction.Show(DmtView.ARTISTS))
                         dispatch(DmtAction.OpenArtist(name))
                     },
-                    onOpenArtists = { dispatch(Dmt
+                    onOpenArtists = { dispatch(DmtAction.Show(DmtView.ARTISTS)) },
+                    onOpenPlaylists = { dispatch(DmtAction.Show(DmtView.PLAYLISTS)) },
+                    onOpenPlaylist = { name ->
+                        dispatch(DmtAction.Show(DmtView.PLAYLISTS))
+                        dispatch(DmtAction.OpenPlaylist(name))
+                    },
+                )
+                state.view == DmtView.STATS -> StatsPane(state, dispatch)
+                state.view == DmtView.BLOCKLIST -> BlocklistPane(state, dispatch)
+                state.view == DmtView.PERMISSIONS -> PermissionsPane(state, dispatch)
+                state.view == DmtView.SETTINGS -> SettingsPane(state, dispatch)
+                state.view == DmtView.SOURCES -> SourcesPane(state, dispatch)
+                state.view == DmtView.SOURCE_LOGIN -> SourceLoginPane(mode = state.loginSource, state = state, dispatch = dispatch)
+                state.scanning && state.tracks.isEmpty() ->
+                    Caption(stringResource(R.string.scanning))
+
+                state.view == DmtView.ALBUMS -> AlbumsPane(state, dispatch)
+                state.view == DmtView.ARTISTS -> ArtistsPane(state, dispatch)
+                state.view == DmtView.GENRES -> GenresPane(state, dispatch)
+                state.view == DmtView.FOLDERS -> FoldersPane(state, dispatch)
+                state.view == DmtView.PLAYLISTS -> PlaylistsPane(state, dispatch)
+                state.view == DmtView.IMPORTED -> ImportedPane(state, dispatch)
+                else -> LibraryPane(state, dispatch)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SideRail(state: DmtState, dispatch: (DmtAction) -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(IntrinsicSize.Max)
+            .fillMaxHeight(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .background(TuiAccent),
+            )
+            Text(
+                text = " " + stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleMedium,
+                color = TuiBright,
+            )
+        }
+        HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 8.dp))
+
+        Spacer(modifier = Modifier.height(12.dp))
+        libraryTabs(state).forEachIndexed { index, (label, view) ->
+            if (index > 0) Spacer(modifier = Modifier.height(8.dp))
+            TuiTab(
+                label = label,
+                active = state.view == view,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                dispatch(DmtAction.Show(view))
+            }
+        }
+        Spacer(modifier = Modifier.weight(1f))
+
+        SourcesTab(state, dispatch, modifier = Modifier.fillMaxWidth())
+        Spacer(modifier = Modifier.height(8.dp))
+        ConfigTab(state, dispatch, modifier = Modifier.fillMaxWidth())
+        Spacer(modifier = Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun SourcesTab(
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val active = state.view == DmtView.SOURCES || state.view == DmtView.SOURCE_LOGIN
+    TuiTab(
+        label = stringResource(R.string.tab_sources),
+        active = active,
+        modifier = modifier,
+    ) {
+        dispatch(DmtAction.Show(if (active) DmtView.LIBRARY else DmtView.SOURCES))
+    }
+}
+
+@Composable
+private fun ConfigTab(
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val active = state.view == DmtView.SETTINGS ||
+            state.view == DmtView.STATS ||
+            state.view == DmtView.PERMISSIONS
+    TuiTab(
+        label = stringResource(R.string.cfg),
+        active = active,
+        modifier = modifier,
+    ) {
+        dispatch(DmtAction.Show(if (active) DmtView.LIBRARY else DmtView.SETTINGS))
+    }
+}
+
+@Composable
+private fun Titlebar(state: DmtState, dispatch: (DmtAction) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .background(TuiAccent),
+        )
+        Text(
+            text = " " + stringResource(R.string.app_name) + " ",
+            style = MaterialTheme.typography.titleMedium,
+            color = TuiBright,
+        )
+        HorizontalDivider(color = TuiLine, modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(10.dp))
+        SourcesTab(state, dispatch)
+        Spacer(modifier = Modifier.width(8.dp))
+        ConfigTab(state, dispatch)
+    }
+}
+
+@Composable
+private fun libraryTabs(state: DmtState): List<Pair<String, DmtView>> =
+    buildList {
+        add(stringResource(R.string.tab_home) to DmtView.HOME)
+        add(stringResource(R.string.tab_library) to DmtView.LIBRARY)
+        add(stringResource(R.string.tab_albums) to DmtView.ALBUMS)
+        add(stringResource(R.string.tab_artists) to DmtView.ARTISTS)
+        if (state.genres.isNotEmpty()) {
+            add(stringResource(R.string.tab_genres) to DmtView.GENRES)
+        }
+        if (state.folders.isNotEmpty()) {
+            add(stringResource(R.string.tab_folders) to DmtView.FOLDERS)
+        }
+        add(stringResource(R.string.tab_playlists) to DmtView.PLAYLISTS)
+    }
+
+@Composable
+private fun TabsRow(state: DmtState, dispatch: (DmtAction) -> Unit) {
+    val tabs = libraryTabs(state)
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(state.view) { requester.bringIntoView() }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 8.dp),
+    ) {
+        tabs.forEach { (label, view) ->
+            val active = state.view == view
+            TuiTab(
+                label = label,
+                active = active,
+                modifier = if (active) {
+                    Modifier.bringIntoViewRequester(requester)
+                } else {
+                    Modifier
+                },
+            ) {
+                dispatch(DmtAction.Show(view))
+            }
+        }
+    }
+}
