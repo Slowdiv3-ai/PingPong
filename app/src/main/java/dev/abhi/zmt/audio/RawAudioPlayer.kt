@@ -46,13 +46,25 @@ class RawAudioPlayer {
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
     private var currentSampleRate: Int = 44100 // REQUIRED FOR refreshAudioTrack
+    private var currentUri: String? = null
 
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        val uriString = uri.toString()
+        
+        // FIX 2: If already playing this exact URI, just seek instantly instead of restarting the thread!
+        // This eliminates the "restart" stutter when seeking.
+        if (playbackThread?.isAlive == true && currentUri == uriString) {
+            Log.d(TAG, "Already playing, seeking to ${startTimeMs}ms")
+            seekTo(startTimeMs)
+            return
+        }
+
         if (playbackThread?.isAlive == true) {
             Log.d(TAG, "Stopping existing playback to start new one")
             stop()
         }
 
+        currentUri = uriString
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
@@ -62,6 +74,7 @@ class RawAudioPlayer {
         lofiCounter = 0
 
         playbackThread = Thread {
+// ... (leave the rest of the playUri function exactly as it was)
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
             
@@ -299,7 +312,7 @@ class RawAudioPlayer {
     fun pause() { isPaused = true; audioTrack?.pause() }
     fun resume() { isPaused = false; audioTrack?.play() }
 
-    @Synchronized
+@Synchronized
     fun stop() {
         if (Thread.currentThread() == playbackThread) {
             isPlaying = false
@@ -308,6 +321,8 @@ class RawAudioPlayer {
         if (!isPlaying && playbackThread == null && audioTrack == null) return
         
         isPlaying = false
+        currentUri = null // Reset URI on stop
+        
         val thread = playbackThread
         if (thread != null) {
             thread.interrupt()
@@ -315,8 +330,9 @@ class RawAudioPlayer {
         }
         playbackThread = null
         
-        try { audioTrack?.stop() } catch (_: Exception) {}
-        try { audioTrack?.release() } catch (_: Exception) {}
-        audioTrack = null
+        audioTrack?.stop(); audioTrack?.release(); audioTrack = null
+        leftPrevLow = 0.0f; rightPrevLow = 0.0f
+        leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
+        leftPrevInput = 0.0f; rightPrevInput = 0.0f
     }
 }
