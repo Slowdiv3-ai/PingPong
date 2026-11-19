@@ -51,23 +51,21 @@ class MainActivity : FragmentActivity() {
     private val playerViewModel: PlayerViewModel by viewModels()
     private val fingerprintAuth = FingerprintAuthManager()
     
-    // --- RAW AUDIO PLAYER INSTANCE ---
+    // --- THIS IS THE ONLY PLAYER WITH DSP RIGHT NOW ---
     private val rawPlayer = RawAudioPlayer()
     
     private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
-            Toast.makeText(this, "File selected, attempting to play...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Starting DSP Test Player...", Toast.LENGTH_SHORT).show()
             
             rawPlayer.playUri(this, uri, 
                 onError = { errorMsg ->
-                    Toast.makeText(this, "ERROR: $errorMsg", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "DSP ERROR: $errorMsg", Toast.LENGTH_LONG).show()
                 },
                 onSuccess = {
-                    Toast.makeText(this, "Playing with PingPong DSP!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "DSP Player Active! Check Settings.", Toast.LENGTH_SHORT).show()
                 }
             )
-        } else {
-            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -99,10 +97,7 @@ class MainActivity : FragmentActivity() {
                         LaunchedEffect(Unit) {
                             playerViewModel.effects.collect { effect ->
                                 when (effect) {
-                                    is PlayerEffect.OpenEqualizer -> openEqualizer(
-                                        effect.audioSessionId,
-                                    )
-
+                                    is PlayerEffect.OpenEqualizer -> openEqualizer(effect.audioSessionId)
                                     is PlayerEffect.RequestWrite -> writeLauncher.launch(
                                         IntentSenderRequest.Builder(effect.intentSender).build(),
                                     )
@@ -159,18 +154,18 @@ class MainActivity : FragmentActivity() {
                                     state = state,
                                     dispatch = playerViewModel::onIntent,
                                     art = playerViewModel::homeArt,
-                                    rawPlayer = rawPlayer, // <--- PASSED HERE
+                                    rawPlayer = rawPlayer, // Passed to settings
                                 )
                             }
                             
-                            // --- TEST BUTTON (You can remove this once you confirm settings work) ---
+                            // --- TEMPORARY TEST BUTTON (DO NOT USE MAIN PLAYER YET) ---
                             Button(
                                 onClick = { pickAudio.launch("audio/*") },
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
                                     .padding(24.dp)
                             ) {
-                                Text("Test DSP Player")
+                                Text("⚠️ TEST DSP PLAYER (Click Me)")
                             }
                         }
                     }
