@@ -44,6 +44,7 @@ import dev.abhi.zmt.ui.theme.TuiAccent
 import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiThemeProvider
 import dev.abhi.zmt.ui.theme.toColor
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
