@@ -169,6 +169,42 @@ fun SettingsPane(
                     RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
                     RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
                 }
+
+                // --- NEW: PRESET SELECTOR ---
+        val presetLabel = when (rawPlayer?.currentPreset) {
+            RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
+            RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
+            RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
+            RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> "helicopter"
+            RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> "deep bass"
+            RawAudioPlayer.PanPreset.FREQ_HI_HATS -> "hi-hats"
+            else -> "unknown"
+        }
+
+        SettingRow(
+            label = "dsp preset",
+            value = presetLabel,
+        ) {
+            rawPlayer?.let { player ->
+                // Cycle through presets based on the current mode
+                player.currentPreset = when (player.currentMode) {
+                    RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
+                        RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
+                        RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
+                        RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+                        else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+                    }
+                    RawAudioPlayer.PanMode.FREQUENCY -> when (player.currentPreset) {
+                        RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> RawAudioPlayer.PanPreset.FREQ_DEEP_BASS
+                        RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> RawAudioPlayer.PanPreset.FREQ_HI_HATS
+                        RawAudioPlayer.PanPreset.FREQ_HI_HATS -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
+                        else -> RawAudioPlayer.PanPreset.FREQ_HELICOPTER
+                    }
+                    RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
+                }
+            }
+        }
+        // --------------------------
                 // Update the local UI state so the text changes immediately!
                 currentMode = it.currentMode 
                 
