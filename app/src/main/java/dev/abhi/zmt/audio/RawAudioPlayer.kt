@@ -123,10 +123,10 @@ class RawAudioPlayer {
                 Handler(Looper.getMainLooper()).post { onSuccess() }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Playback error", e)
-                // Send the error back to the UI
-                Handler(Looper.getMainLooper()).post { onError(e.message ?: "Unknown error") }
-            } finally {
+                e.printStackTrace() // THIS prints the full error to adb
+                Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+            }
+                finally {
                 stop()
             }
         }
