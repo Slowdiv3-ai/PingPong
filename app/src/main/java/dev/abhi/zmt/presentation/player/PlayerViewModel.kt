@@ -1586,8 +1586,14 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        // 1. Detach the ExoPlayer listener so it doesn't trigger multiple times
+        controller?.removeListener(listener)
+        
+        // 2. Release the ExoPlayer controller
         controller?.release()
         controller = null
-        rawPlayer.stop() // Clean up DSP player
+        
+        // 3. Detach and stop the RawAudioPlayer background thread to prevent crashes
+        rawPlayer.stop()
     }
-} // <-- THIS IS THE FINAL CLOSING BRACE OF PLAYERVIEWMODEL
+} // <-- This is the final closing brace of the whole file
