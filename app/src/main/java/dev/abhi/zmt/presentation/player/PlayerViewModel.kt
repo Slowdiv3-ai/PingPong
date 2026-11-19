@@ -1063,7 +1063,7 @@ class PlayerViewModel @Inject constructor(
         }
 
     private val listener = object : Player.Listener {
-       override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reduce {
                 it.withNowPlaying(controller).copy(
                     showDownloadSheet = false,
@@ -1087,7 +1087,6 @@ class PlayerViewModel @Inject constructor(
             if (track != null) {
                 reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
                 
-                // Play through our DSP engine
                 rawPlayer.playUri(context, track.uri,
                     onError = { msg -> 
                         android.util.Log.e("RawAudioPlayer", "Playback error: $msg")
@@ -1095,10 +1094,9 @@ class PlayerViewModel @Inject constructor(
                     },
                     onSuccess = { }
                 )
-                // Mute ExoPlayer so we don't hear double audio
-                controller?.volume = 0f
+                controller?.volume = 0f // Mute ExoPlayer safely
             }
-        } 
+        }
 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
@@ -1106,7 +1104,6 @@ class PlayerViewModel @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
-            // Sync pause/resume with RawAudioPlayer
             if (isPlaying) {
                 rawPlayer.resume()
             } else {
