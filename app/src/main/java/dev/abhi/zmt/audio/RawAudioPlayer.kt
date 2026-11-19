@@ -34,10 +34,14 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
-    private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
-    private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
-    private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
-    private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
+    private var leftPrevLow = 0.0f
+    private var rightPrevLow = 0.0f
+    private var leftPrevHigh = 0.0f
+    private var rightPrevHigh = 0.0f
+    private var leftPrevInput = 0.0f
+    private var rightPrevInput = 0.0f
+    private var lofiHoldL = 0.0f
+    private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
     private var isPlaying = false
@@ -48,18 +52,16 @@ class RawAudioPlayer {
     private var currentSampleRate: Int = 44100
 
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
         // CRITICAL FIX: If a thread is already running, kill it instantly before starting a new one.
         if (playbackThread?.isAlive == true) {
             isPlaying = false
             playbackThread?.interrupt()
-            try { playbackThread?.join(500) } catch (_: InterruptedException) {} // Short timeout only
+            try { playbackThread?.join(500) } catch (_: InterruptedException) {}
         }
 
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
-        // ... (rest of your existing playUri code remains exactly the same)
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
@@ -90,7 +92,11 @@ class RawAudioPlayer {
                 for (i in 0 until extractor.trackCount) {
                     val f = extractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
+                    if (mime.startsWith("audio/")) { 
+                        audioTrackIndex = i
+                        format = f
+                        break 
+                    }
                 }
                 if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
@@ -113,10 +119,12 @@ class RawAudioPlayer {
                 audioTrack?.play()
 
                 val bufferInfo = MediaCodec.BufferInfo()
-                var sawInputEOS = false; var sawOutputEOS = false
+                var sawInputEOS = false
+                var sawOutputEOS = false
 
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
+                    
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -153,7 +161,9 @@ class RawAudioPlayer {
                         }
                         codec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
-                    } else if (isPaused) { Thread.sleep(20) }
+                    } else if (isPaused) { 
+                        Thread.sleep(20) 
+                    }
                 }
                 Handler(Looper.getMainLooper()).post { onSuccess() }
             } catch (e: Exception) {
@@ -163,9 +173,9 @@ class RawAudioPlayer {
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
-        } // <--- THIS BRACE CLOSES THE THREAD LAMBDA
+        }
         playbackThread?.start()
-    } // <--- THIS BRACE CLOSES playUri
+    }
 
     // --- DSP EFFECTS ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
@@ -176,7 +186,8 @@ class RawAudioPlayer {
             var swing = (sin(lfoPhase) + 1.0f) / 2.0f
             if (currentPreset == PanPreset.VOL_GENTLE) swing = (swing - 0.5f) * 0.4f + 0.5f
             if (currentPreset == PanPreset.VOL_CHOP) swing = if (swing > 0.5f) 1f else 0f
-            val outL = sampleL * (1.0f - (swing * depth)); val outR = sampleR * (swing * depth)
+            val outL = sampleL * (1.0f - (swing * depth))
+            val outR = sampleR * (swing * depth)
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
@@ -323,4 +334,4 @@ class RawAudioPlayer {
         try { audioTrack?.release() } catch (_: Exception) {}
         audioTrack = null
     }
-    }
+} // <--- THIS IS THE MISSING CLOSING BRACE FOR THE CLASS
