@@ -49,8 +49,19 @@ class RawAudioPlayer {
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
-                extractor.setDataSource(context, uri, null)
-
+                
+                // CRITICAL FIX: Handle file:// URIs using FileDescriptor to bypass Scoped Storage blocks
+                if (uri.scheme == "file") {
+                    val file = java.io.File(uri.path)
+                    if (file.exists()) {
+                        val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                        extractor.setDataSource(fd.fileDescriptor)
+                    } else {
+                        throw Exception("File not found: ${uri.path}")
+                    }
+                } else {
+                    extractor.setDataSource(context, uri, null)
+                }
                 // SEEK SUPPORT: Jump to the requested timestamp before decoding
                 if (startTimeMs > 0) {
                     extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
