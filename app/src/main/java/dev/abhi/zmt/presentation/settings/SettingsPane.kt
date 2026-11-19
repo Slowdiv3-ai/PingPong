@@ -84,7 +84,9 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
         // ==========================================
         Caption("pingpong dsp")
         
-        val currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
+        var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
+        var currentPreset by remember { mutableStateOf(rawPlayer?.currentPreset ?: RawAudioPlayer.PanPreset.VOL_SMOOTH) }
+        
         val modeLabel = when (currentMode) {
             RawAudioPlayer.PanMode.OFF -> "off"
             RawAudioPlayer.PanMode.VOLUME -> "volume"
@@ -98,10 +100,11 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                     RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
                     RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.OFF
                 }
+                currentMode = player.currentMode // <--- THIS FIXES THE UI
             }
         }
 
-        val presetLabel = when (rawPlayer?.currentPreset) {
+            val presetLabel = when (currentPreset) {
             RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
             RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
             RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
@@ -128,6 +131,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                     }
                     RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
                 }
+                currentPreset = player.currentPreset // <--- THIS FIXES THE UI
             }
         }
 
