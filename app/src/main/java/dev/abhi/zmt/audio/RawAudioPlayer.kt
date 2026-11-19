@@ -25,7 +25,6 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
-    // Filter states for Crossover Split
     private var leftPrevLow = 0.0f
     private var rightPrevLow = 0.0f
 
@@ -34,10 +33,25 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
+    
+    // Debounce to prevent ExoPlayer from spamming playUri
+    private var lastUri: String? = null
+    private var lastStartTime: Long = -1
 
-    // Added startTimeMs to support seeking from the main player
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        val uriString = uri.toString()
+        
+        // DEBOUNCE: If ExoPlayer spams the same URI and time, ignore it
+        if (uriString == lastUri && Math.abs(startTimeMs - lastStartTime) < 500) {
+            Log.d(TAG, "Ignoring duplicate playUri call")
+            return
+        }
+        lastUri = uriString
+        lastStartTime = startTimeMs
+
+        // Safely stop previous playback from the MAIN thread
         stop() 
+        
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
@@ -50,7 +64,6 @@ class RawAudioPlayer {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
                 
-                // CRITICAL FIX: Handle file:// URIs using FileDescriptor to bypass Scoped Storage blocks
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
@@ -62,9 +75,11 @@ class RawAudioPlayer {
                 } else {
                     extractor.setDataSource(context, uri, null)
                 }
-                // SEEK SUPPORT: Jump to the requested timestamp before decoding
+
+                // SEEK SUPPORT
                 if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    val seekSuccess = extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    Log.d(TAG, "Seek to ${startTimeMs}ms result: $seekSuccess")
                 }
 
                 var audioTrackIndex = -1
@@ -137,18 +152,15 @@ class RawAudioPlayer {
                                 PanMode.FREQUENCY -> applyFrequencyBandSwap(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
 
-                            // PAUSE FIX: Only write if not paused
                             if (!isPaused) {
                                 audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                             }
                         }
 
-                        // CRITICAL: Always release the buffer, even if paused, to prevent decoder freeze
                         codec.releaseOutputBuffer(outputBufferIndex, false)
 
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
                     } else if (isPaused) {
-                        // If paused and no output, sleep briefly to prevent 100% CPU usage
                         Thread.sleep(20)
                     }
                 }
@@ -156,6 +168,8 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
+                // CRITICAL FIX: DO NOT CALL stop() HERE. It causes a deadlock.
+                // Only release the codec and extractor.
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
@@ -173,9 +187,6 @@ class RawAudioPlayer {
             val outL = sampleL * (1.0f - (swing * depth))
             val outR = sampleR * (swing * depth)
 
-            bytes[i] = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toByte()
-            bytes[i+1] = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toByte().let { ((outL.coerceIn(-1f, 1f) * 32767f).toInt() shr 8).toByte() }
-            // Simplified byte writing for brevity, using standard shift:
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
@@ -185,9 +196,8 @@ class RawAudioPlayer {
         }
     }
 
-    // TRUE FREQUENCY SPLIT: Bass and Treble swap ears
     private fun applyFrequencyBandSwap(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
-        val crossoverFreq = 1000f // Split point: 1000Hz
+        val crossoverFreq = 1000f
         val alpha = 1.0f - exp(-2.0f * PI.toFloat() * crossoverFreq / sampleRate)
         var i = 0
 
@@ -195,22 +205,17 @@ class RawAudioPlayer {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
 
-            // 1. Split into Low (Bass) and High (Treble) bands
             val lowL = leftPrevLow + alpha * (sampleL - leftPrevLow); leftPrevLow = lowL
             val lowR = rightPrevLow + alpha * (sampleR - rightPrevLow); rightPrevLow = lowR
             
-            val highL = sampleL - lowL // High = Original - Low
+            val highL = sampleL - lowL
             val highR = sampleR - lowR
 
-            // 2. LFO Swap (0 to 1)
             val swing = (sin(lfoPhase) + 1.0f) / 2.0f
             
-            // Left Ear: Gets Bass when swing=0, Gets Treble when swing=1
             val outL = lowL * (1f - swing) + highL * swing
-            // Right Ear: Gets Treble when swing=0, Gets Bass when swing=1
             val outR = highR * (1f - swing) + lowR * swing
 
-            // 3. Apply Depth (Mix with original dry signal)
             val finalL = sampleL + depth * (outL - sampleL)
             val finalR = sampleR + depth * (outR - sampleR)
 
@@ -228,12 +233,23 @@ class RawAudioPlayer {
 
     @Synchronized
     fun stop() {
+        // CRITICAL FIX: If stop() is called from the background thread, just set flags.
+        // Do NOT call thread.join() on the current thread.
+        if (Thread.currentThread() == playbackThread) {
+            isPlaying = false
+            return
+        }
+
         if (!isPlaying && playbackThread == null && audioTrack == null) return
         isPlaying = false
         val thread = playbackThread
-        if (thread != null) { thread.interrupt(); try { thread.join(2000) } catch (_: InterruptedException) {} }
+        if (thread != null) { 
+            thread.interrupt()
+            try { thread.join(2000) } catch (_: InterruptedException) {} 
+        }
         playbackThread = null
         audioTrack?.stop(); audioTrack?.release(); audioTrack = null
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
+        Log.d(TAG, "RawAudioPlayer stopped safely from main thread")
     }
 }
