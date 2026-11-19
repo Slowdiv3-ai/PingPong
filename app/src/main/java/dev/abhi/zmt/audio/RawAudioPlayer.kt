@@ -48,15 +48,18 @@ class RawAudioPlayer {
     private var currentSampleRate: Int = 44100
 
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        // CRITICAL FIX: If a thread is already running, kill it instantly before starting a new one.
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Ignoring duplicate playUri call")
-            return
+            isPlaying = false
+            playbackThread?.interrupt()
+            try { playbackThread?.join(500) } catch (_: InterruptedException) {} // Short timeout only
         }
 
-        stop()
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
+        // ... (rest of your existing playUri code remains exactly the same)
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
@@ -156,6 +159,7 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
+                // CRITICAL: DO NOT CALL stop() HERE. It crashes the background thread.
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
             }
@@ -309,12 +313,13 @@ class RawAudioPlayer {
 
     @Synchronized
     fun stop() {
-        if (Thread.currentThread() == playbackThread) { isPlaying = false; return }
-        if (!isPlaying && playbackThread == null && audioTrack == null) return
         isPlaying = false
+        // CRITICAL FIX: Do NOT use thread.join(). It causes deadlocks and crashes.
+        // Just interrupt the thread and let it die on its own.
         playbackThread?.interrupt()
-        try { playbackThread?.join(1000) } catch (_: InterruptedException) {}
         playbackThread = null
-        audioTrack?.stop(); audioTrack?.release(); audioTrack = null
+        
+        try { audioTrack?.stop() } catch (_: Exception) {}
+        try { audioTrack?.release() } catch (_: Exception) {}
+        audioTrack = null
     }
-} // <--- THIS BRACE CLOSES THE CLASS
