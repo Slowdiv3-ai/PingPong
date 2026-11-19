@@ -33,6 +33,11 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
+
+    // Keep references so we can seek and refresh the audio track
+    private var currentExtractor: MediaExtractor? = null
+    private var currentCodec: MediaCodec? = null
+    private var currentSampleRate: Int = 44100
     
     // Debounce to prevent ExoPlayer from spamming playUri
     private var lastUri: String? = null
@@ -102,6 +107,9 @@ class RawAudioPlayer {
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
                 codec = MediaCodec.createDecoderByType(mime)
+                currentExtractor = extractor
+                currentCodec = codec
+                currentSampleRate = actualSampleRate
                 codec.configure(format, null, null, 0)
                 codec.start()
 
@@ -235,6 +243,56 @@ class RawAudioPlayer {
     fun pause() { isPaused = true; audioTrack?.pause() }
     fun resume() { isPaused = false; audioTrack?.play() }
 
+
+
+    fun seekTo(timeMs: Long) {
+        val ext = currentExtractor ?: return
+        val cod = currentCodec ?: return
+        val track = audioTrack ?: return
+
+        try {
+            // 1. Seek the extractor to the exact microsecond
+            ext.seekTo(timeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            // 2. Flush the decoder and audiotrack to clear old buffers
+            cod.flush()
+            track.flush()
+            // 3. Reset LFO phase so the effect doesn't jump weirdly
+            lfoPhase = 0.0f
+            leftPrevLow = 0.0f
+            rightPrevLow = 0.0f
+        } catch (e: Exception) {
+            Log.e(TAG, "Seek failed", e)
+        }
+    }
+
+    fun refreshAudioTrack() {
+        // When Bluetooth/Speaker switches, the old AudioTrack dies. 
+        // We recreate it so the audio route is fixed.
+        val track = audioTrack
+        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
+            try {
+                track.stop()
+                track.release()
+            } catch (_: Exception) {}
+
+            val minBufferSize = AudioTrack.getMinBufferSize(
+                currentSampleRate,
+                AudioFormat.CHANNEL_OUT_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val newTrack = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setBufferSizeInBytes(minBufferSize * 4)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            audioTrack = newTrack
+            newTrack.play()
+        } else if (track != null) {
+            track.play() // Force play if it was just paused
+        }
+    }
+    
     @Synchronized
     fun stop() {
         // CRITICAL FIX: If stop() is called from the background thread, just set flags.
