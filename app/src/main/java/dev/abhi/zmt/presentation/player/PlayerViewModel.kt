@@ -1117,6 +1117,9 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
+                // CRITICAL FIX: When user hits play, refresh the AudioTrack route 
+                // (fixes silence after Bluetooth/Speaker switching)
+                rawPlayer.refreshAudioTrack()
                 rawPlayer.resume()
             } else {
                 rawPlayer.pause()
@@ -1124,11 +1127,9 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // If the user seeks, we just let ExoPlayer handle the UI. 
-            // We do NOT restart RawAudioPlayer yet, because MediaExtractor seeking is unstable.
-            // This prevents the "restarts at 0:00" bug.
+            // If the user manually seeks, force RawAudioPlayer to jump to the exact same spot
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                android.util.Log.d("RawAudioPlayer", "Seek detected. UI updated, audio will restart shortly.")
+                rawPlayer.seekTo(newPosition.positionMs)
             }
         }
 
