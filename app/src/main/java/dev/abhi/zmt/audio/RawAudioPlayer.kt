@@ -34,7 +34,6 @@ class RawAudioPlayer {
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
 
-    // Filter states
     private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
     private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
     private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
@@ -46,13 +45,14 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
-    private var currentSampleRate: Int = 44100
 
     @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        // CRITICAL FIX: If a thread is already running, stop it FIRST.
+        // This allows track changes and seeks to actually happen!
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Ignoring duplicate playUri call, thread is still alive")
-            return
+            Log.d(TAG, "Stopping existing playback to start new one")
+            stop()
         }
 
         isPlaying = true
@@ -70,6 +70,7 @@ class RawAudioPlayer {
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
+                
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
@@ -96,7 +97,9 @@ class RawAudioPlayer {
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                currentSampleRate = actualSampleRate
+                if (startTimeMs > 0) {
+                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                }
 
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
@@ -107,16 +110,13 @@ class RawAudioPlayer {
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                     .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-                
                 audioTrack?.play()
 
                 val bufferInfo = MediaCodec.BufferInfo()
-                var sawInputEOS = false
-                var sawOutputEOS = false
+                var sawInputEOS = false; var sawOutputEOS = false
 
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
-                    
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -166,38 +166,6 @@ class RawAudioPlayer {
         playbackThread?.start()
     }
 
-    fun refreshAudioTrack() {
-        val track = audioTrack
-        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
-            try { track.stop(); track.release() } catch (_: Exception) {}
-            val minBufferSize = AudioTrack.getMinBufferSize(currentSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            val newTrack = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-            audioTrack = newTrack
-            newTrack.play()
-        } else if (track != null) { track.play() }
-    }
-
-    fun pause() { isPaused = true; audioTrack?.pause() }
-    fun resume() { isPaused = false; audioTrack?.play() }
-
-    @Synchronized
-    fun stop() {
-        isPlaying = false
-        val thread = playbackThread
-        if (thread != null) {
-            thread.interrupt()
-            try { thread.join(2000) } catch (_: InterruptedException) {}
-            playbackThread = null
-        }
-        try { audioTrack?.stop() } catch (_: Exception) {}
-        try { audioTrack?.release() } catch (_: Exception) {}
-        audioTrack = null
-    }
-
-    // --- DSP EFFECTS ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
         var i = 0
         while (i < size - 3) {
@@ -313,5 +281,29 @@ class RawAudioPlayer {
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
+    }
+
+    fun pause() { isPaused = true; audioTrack?.pause() }
+    fun resume() { isPaused = false; audioTrack?.play() }
+
+    @Synchronized
+    fun stop() {
+        if (Thread.currentThread() == playbackThread) {
+            isPlaying = false
+            return
+        }
+        if (!isPlaying && playbackThread == null && audioTrack == null) return
+        
+        isPlaying = false
+        val thread = playbackThread
+        if (thread != null) {
+            thread.interrupt()
+            try { thread.join(1000) } catch (_: InterruptedException) {}
+        }
+        playbackThread = null
+        
+        try { audioTrack?.stop() } catch (_: Exception) {}
+        try { audioTrack?.release() } catch (_: Exception) {}
+        audioTrack = null
     }
 }
