@@ -24,6 +24,7 @@ import androidx.media3.session.MediaController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.abhi.zmt.R
+import dev.abhi.zmt.audio.RawAudioPlayer
 import dev.abhi.zmt.core.base.BaseViewModel
 import dev.abhi.zmt.core.common.generateAsciiPlaceholder
 import dev.abhi.zmt.core.common.toAsciiBitmap
@@ -111,6 +112,7 @@ private data class FilteredLibrary(
 class PlayerViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val preferencesRepository: PreferencesRepository,
+    private val rawPlayer: RawAudioPlayer,
     private val scanLibrary: ScanLibraryUseCase,
     private val jellyfinLogin: JellyfinLoginUseCase,
     private val telegramLogin: TelegramLoginUseCase,
