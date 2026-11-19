@@ -21,6 +21,14 @@ class RawAudioPlayer {
 
     enum class PanMode { OFF, VOLUME, FREQUENCY }
 
+       // --- NEW: PRESET SYSTEM ---
+    enum class PanPreset {
+        // Volume Presets
+        VOL_SMOOTH, VOL_GENTLE, VOL_CHOP,
+        // Frequency Presets
+        FREQ_HELICOPTER, FREQ_DEEP_BASS, FREQ_HI_HATS
+    }
+
     @Volatile var currentMode: PanMode = PanMode.OFF
     @Volatile var lfoFreq: Float = 0.5f
     @Volatile var depth: Float = 1.0f
@@ -194,10 +202,28 @@ class RawAudioPlayer {
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
+
+            var swing = (sin(lfoPhase) + 1.0f) / 2.0f
             
-            val outL = sampleL * (1.0f - (swing * depth))
-            val outR = sampleR * (swing * depth)
+            // Apply Preset Math
+            when (currentPreset) {
+                PanPreset.VOL_SMOOTH -> { /* Standard sine wave */ }
+                PanPreset.VOL_GENTLE -> { 
+                    // Compress the swing so it only moves 40% left/right instead of 100%
+                    swing = (swing - 0.5f) * 0.4f + 0.5f 
+                }
+                PanPreset.VOL_CHOP -> { 
+                    // Square wave: instantly jumps from left to right
+                    swing = if (swing > 0.5f) 1f else 0f 
+                }
+                else -> {}
+            }
+
+            val leftGain = 1.0f - (swing * depth)
+            val rightGain = swing * depth
+
+            val outL = sampleL * leftGain
+            val outR = sampleR * rightGain
 
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
@@ -208,8 +234,15 @@ class RawAudioPlayer {
         }
     }
 
-    private fun applyFrequencyBandSwap(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
-        val crossoverFreq = 1000f
+    private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
+        // Determine crossover frequency based on preset
+        val crossoverFreq = when (currentPreset) {
+            PanPreset.FREQ_HELICOPTER -> 1000f  // Standard mid-range swap
+            PanPreset.FREQ_DEEP_BASS -> 200f    // Only swaps sub-bass/808s
+            PanPreset.FREQ_HI_HATS -> 6000f     // Only swaps cymbals/air
+            else -> 1000f
+        }
+
         val alpha = 1.0f - exp(-2.0f * PI.toFloat() * crossoverFreq / sampleRate)
         var i = 0
 
@@ -217,14 +250,17 @@ class RawAudioPlayer {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
 
+            var swing = (sin(lfoPhase) + 1.0f) / 2.0f
+            
+            // The "DJ Scratch" effect (optional square wave for frequency)
+            // if (currentPreset == PanPreset.FREQ_SCRATCH) swing = if (swing > 0.5f) 1f else 0f
+
             val lowL = leftPrevLow + alpha * (sampleL - leftPrevLow); leftPrevLow = lowL
             val lowR = rightPrevLow + alpha * (sampleR - rightPrevLow); rightPrevLow = lowR
             
             val highL = sampleL - lowL
             val highR = sampleR - lowR
 
-            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
-            
             val outL = lowL * (1f - swing) + highL * swing
             val outR = highR * (1f - swing) + lowR * swing
 
@@ -239,7 +275,6 @@ class RawAudioPlayer {
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
     }
-
     fun pause() { isPaused = true; audioTrack?.pause() }
     fun resume() { isPaused = false; audioTrack?.play() }
 
