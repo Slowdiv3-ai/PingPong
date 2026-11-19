@@ -45,26 +45,17 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
-    private var currentSampleRate: Int = 44100 // REQUIRED FOR refreshAudioTrack
-    private var currentUri: String? = null
+    private var currentSampleRate: Int = 44100
 
+    @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        val uriString = uri.toString()
-        
-        // FIX 2: If already playing this exact URI, just seek instantly instead of restarting the thread!
-        // This eliminates the "restart" stutter when seeking.
-        if (playbackThread?.isAlive == true && currentUri == uriString) {
-            Log.d(TAG, "Already playing, seeking to ${startTimeMs}ms")
-            seekTo(startTimeMs)
-            return
-        }
-
+        // YOUR IDEA: If already playing, safely stop and restart the whole player. 
+        // This completely bypasses MediaExtractor's buggy in-place seekTo()!
         if (playbackThread?.isAlive == true) {
-            Log.d(TAG, "Stopping existing playback to start new one")
+            Log.d(TAG, "Restarting player for seek/track change")
             stop()
         }
 
-        currentUri = uriString
         isPlaying = true
         isPaused = false
         lfoPhase = 0.0f
@@ -74,13 +65,13 @@ class RawAudioPlayer {
         lofiCounter = 0
 
         playbackThread = Thread {
-// ... (leave the rest of the playUri function exactly as it was)
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
             
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
+                
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
@@ -107,7 +98,7 @@ class RawAudioPlayer {
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                currentSampleRate = actualSampleRate // SAVE IT HERE
+                currentSampleRate = actualSampleRate
 
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
@@ -174,24 +165,7 @@ class RawAudioPlayer {
         playbackThread?.start()
     }
 
-    // --- THIS IS THE FUNCTION IT IS COMPLAINING ABOUT ---
-    fun refreshAudioTrack() {
-        val track = audioTrack
-        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
-            try { track.stop(); track.release() } catch (_: Exception) {}
-            val minBufferSize = AudioTrack.getMinBufferSize(currentSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            val newTrack = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-            audioTrack = newTrack
-            newTrack.play()
-        } else if (track != null) {
-            track.play()
-        }
-    }
-
-
+    // --- DSP EFFECTS ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
         var i = 0
         while (i < size - 3) {
@@ -309,30 +283,47 @@ class RawAudioPlayer {
         }
     }
 
+    // --- LIFECYCLE ---
+    fun seekTo(timeMs: Long) {
+        // Kept for safety, though restarting via playUri is now our primary seek method
+        val ext = currentExtractor ?: return
+        val cod = currentCodec ?: return
+        val track = audioTrack ?: return
+        try {
+            ext.seekTo(timeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            cod.flush(); track.flush()
+            lfoPhase = 0.0f; leftPrevLow = 0.0f; rightPrevLow = 0.0f
+        } catch (e: Exception) { Log.e(TAG, "Seek failed", e) }
+    }
+
+    fun refreshAudioTrack() {
+        val track = audioTrack
+        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
+            try { track.stop(); track.release() } catch (_: Exception) {}
+            val minBufferSize = AudioTrack.getMinBufferSize(currentSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+            val newTrack = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
+            audioTrack = newTrack
+            newTrack.play()
+        } else if (track != null) { track.play() }
+    }
+
     fun pause() { isPaused = true; audioTrack?.pause() }
     fun resume() { isPaused = false; audioTrack?.play() }
 
-@Synchronized
+    @Synchronized
     fun stop() {
-        if (Thread.currentThread() == playbackThread) {
-            isPlaying = false
-            return
-        }
+        if (Thread.currentThread() == playbackThread) { isPlaying = false; return }
         if (!isPlaying && playbackThread == null && audioTrack == null) return
-        
         isPlaying = false
-        currentUri = null // Reset URI on stop
-        
         val thread = playbackThread
         if (thread != null) {
             thread.interrupt()
             try { thread.join(1000) } catch (_: InterruptedException) {}
         }
         playbackThread = null
-        
         audioTrack?.stop(); audioTrack?.release(); audioTrack = null
-        leftPrevLow = 0.0f; rightPrevLow = 0.0f
-        leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
-        leftPrevInput = 0.0f; rightPrevInput = 0.0f
     }
 }
