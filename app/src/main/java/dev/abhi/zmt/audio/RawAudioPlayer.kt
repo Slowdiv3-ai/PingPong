@@ -45,11 +45,9 @@ class RawAudioPlayer {
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
+    private var currentSampleRate: Int = 44100 // REQUIRED FOR refreshAudioTrack
 
-    @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        // CRITICAL FIX: If a thread is already running, stop it FIRST.
-        // This allows track changes and seeks to actually happen!
         if (playbackThread?.isAlive == true) {
             Log.d(TAG, "Stopping existing playback to start new one")
             stop()
@@ -70,7 +68,6 @@ class RawAudioPlayer {
             try {
                 Log.d(TAG, "Starting playback for URI: $uri at ${startTimeMs}ms")
                 extractor = MediaExtractor()
-                
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
@@ -97,9 +94,7 @@ class RawAudioPlayer {
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                }
+                currentSampleRate = actualSampleRate // SAVE IT HERE
 
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
@@ -165,6 +160,24 @@ class RawAudioPlayer {
         }
         playbackThread?.start()
     }
+
+    // --- THIS IS THE FUNCTION IT IS COMPLAINING ABOUT ---
+    fun refreshAudioTrack() {
+        val track = audioTrack
+        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
+            try { track.stop(); track.release() } catch (_: Exception) {}
+            val minBufferSize = AudioTrack.getMinBufferSize(currentSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+            val newTrack = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(currentSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
+            audioTrack = newTrack
+            newTrack.play()
+        } else if (track != null) {
+            track.play()
+        }
+    }
+
 
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
         var i = 0
