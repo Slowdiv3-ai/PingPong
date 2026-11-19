@@ -3,9 +3,7 @@ package dev.abhi.zmt
 import android.content.Intent
 import android.graphics.Color
 import android.media.audiofx.AudioEffect
-import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -17,8 +15,6 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,7 +25,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import dagger.hilt.android.AndroidEntryPoint
 import dev.abhi.zmt.audio.RawAudioPlayer
@@ -52,24 +47,9 @@ class MainActivity : FragmentActivity() {
     private val playerViewModel: PlayerViewModel by viewModels()
     private val fingerprintAuth = FingerprintAuthManager()
     
-    // --- THIS IS THE ONLY PLAYER WITH DSP RIGHT NOW ---
-    // --- INJECT THE SAME SINGLETON INSTANCE USED BY VIEWMODEL ---
-    @Inject lateinit var rawPlayer: RawAudioPlayer
-    
-    private val pickAudio = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            Toast.makeText(this, "Starting DSP Test Player...", Toast.LENGTH_SHORT).show()
-            
-            rawPlayer.playUri(this, uri, 
-                onError = { errorMsg ->
-                    Toast.makeText(this, "DSP ERROR: $errorMsg", Toast.LENGTH_LONG).show()
-                },
-                onSuccess = {
-                    Toast.makeText(this, "DSP Player Active! Check Settings.", Toast.LENGTH_SHORT).show()
-                }
-            )
-        }
-    }
+    // Injected Singleton used by both the Main Player and the Settings UI
+    @Inject
+    lateinit var rawPlayer: RawAudioPlayer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,18 +136,8 @@ class MainActivity : FragmentActivity() {
                                     state = state,
                                     dispatch = playerViewModel::onIntent,
                                     art = playerViewModel::homeArt,
-                                    rawPlayer = rawPlayer, // Passed to settings
+                                    rawPlayer = rawPlayer, // Passed to Settings
                                 )
-                            }
-                            
-                            // --- TEMPORARY TEST BUTTON (DO NOT USE MAIN PLAYER YET) ---
-                            Button(
-                                onClick = { pickAudio.launch("audio/*") },
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(24.dp)
-                            ) {
-                                Text("⚠️ TEST DSP PLAYER (Click Me)")
                             }
                         }
                     }
