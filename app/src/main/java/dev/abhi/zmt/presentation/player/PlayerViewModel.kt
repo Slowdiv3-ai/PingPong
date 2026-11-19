@@ -1062,6 +1062,9 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
+
+    private var lastPlayedTrackId: String? = null
+    
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reduce {
