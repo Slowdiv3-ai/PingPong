@@ -19,17 +19,19 @@ class RawAudioPlayer {
         private const val TAG = "RawAudioPlayer"
     }
 
-    // --- DYNAMIC DSP PARAMETERS (controlled by the UI) ---
+    // --- DYNAMIC DSP PARAMETERS ---
     enum class PanMode { OFF, VOLUME, FREQUENCY }
 
-    // @Volatile makes these safe to change from the UI thread while the audio thread reads them
     @Volatile var currentMode: PanMode = PanMode.OFF
     @Volatile var lfoFreq: Float = 0.5f   // sweep speed in Hz
-    @Volatile var depth: Float = 0.8f     // wet/dry intensity (0 = dry, 1 = full effect)
+    @Volatile var depth: Float = 1.0f     // Intensity (Default 1.0 for max effect)
 
-    // Filter state for Frequency Pan (1-pole lowpass)
+    // Filter state for Frequency Pan
     private var leftPrevSample = 0.0f
     private var rightPrevSample = 0.0f
+    // Second pole for steeper filtering (makes the separation sharper)
+    private var leftPrevSample2 = 0.0f
+    private var rightPrevSample2 = 0.0f
 
     private var isPlaying = false
     private var audioTrack: AudioTrack? = null
@@ -102,13 +104,13 @@ class RawAudioPlayer {
                 var sawInputEOS = false
                 var sawOutputEOS = false
 
-                // Reset DSP state for a fresh playback
                 lfoPhase = 0.0f
                 leftPrevSample = 0.0f
                 rightPrevSample = 0.0f
+                leftPrevSample2 = 0.0f
+                rightPrevSample2 = 0.0f
 
                 while (isPlaying && !sawOutputEOS) {
-                    // 1. Feed compressed data into the decoder
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -116,37 +118,27 @@ class RawAudioPlayer {
                             inputBuffer?.clear()
                             val sampleSize = extractor.readSampleData(inputBuffer!!, 0)
                             if (sampleSize < 0) {
-                                codec.queueInputBuffer(
-                                    inputBufferIndex, 0, 0, 0,
-                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                                )
+                                codec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 sawInputEOS = true
                             } else {
-                                codec.queueInputBuffer(
-                                    inputBufferIndex, 0, sampleSize,
-                                    extractor.sampleTime, 0
-                                )
+                                codec.queueInputBuffer(inputBufferIndex, 0, sampleSize, extractor.sampleTime, 0)
                                 extractor.advance()
                             }
                         }
                     }
 
-                    // 2. Pull decoded PCM out of the decoder
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
 
                         if (bufferInfo.size > 0 && channelCount == 2 && outputBuffer != null) {
-                            // Copy read-only decoder buffer into a writable ByteArray
                             val bytes = ByteArray(bufferInfo.size)
                             outputBuffer.get(bytes)
 
-                            // Recompute step every loop so speed changes apply live
                             val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
-                            // Apply DSP based on the mode selected in the UI
                             when (currentMode) {
-                                PanMode.OFF -> { /* pass-through, do nothing */ }
+                                PanMode.OFF -> { /* pass-through */ }
                                 PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep)
                                 PanMode.FREQUENCY ->
                                     applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep)
@@ -160,8 +152,6 @@ class RawAudioPlayer {
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             sawOutputEOS = true
                         }
-                    } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        Log.d(TAG, "Output format changed")
                     }
                 }
 
@@ -179,9 +169,9 @@ class RawAudioPlayer {
         playbackThread?.start()
     }
 
-    // LFO phase is shared across both modes so switching mid-playback stays smooth
     private var lfoPhase = 0.0f
 
+    // --- AGGRESSIVE VOLUME PAN ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
         var i = 0
         while (i < size - 3) {
@@ -193,14 +183,18 @@ class RawAudioPlayer {
             val b3 = bytes[i + 3].toInt() and 0xFF
             val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
-            val pan = (sin(lfoPhase) + 1.0f) / 2.0f
-            val angle = pan * (PI.toFloat() / 2.0f)
-            val leftGain = cos(angle)
-            val rightGain = sin(angle)
+            // Sine wave goes -1 to 1. We map it to 0 to 1.
+            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
+            
+            // Linear Panning: Hard swing from Left to Right
+            // If swing is 0 (Left): leftGain=1, rightGain=0
+            // If swing is 1 (Right): leftGain=0, rightGain=1
+            // We use 'depth' to control how extreme the swing is.
+            val leftGain = 1.0f - (swing * depth)
+            val rightGain = swing * depth
 
-            // Wet/dry mix: depth=0 -> dry, depth=1 -> full pan
-            val outL = sampleL * (1f - depth + depth * leftGain)
-            val outR = sampleR * (1f - depth + depth * rightGain)
+            val outL = sampleL * leftGain
+            val outR = sampleR * rightGain
 
             val shortL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (shortL.toInt() and 0xFF).toByte()
@@ -216,9 +210,11 @@ class RawAudioPlayer {
         }
     }
 
+    // --- AGGRESSIVE FREQUENCY PAN ---
     private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float) {
-        val minCutoff = 200f
-        val maxCutoff = 8000f
+        // Extreme range: 40Hz (Sub bass/Kicks) to 16000Hz (Hi-hats/Air)
+        val minCutoff = 40f
+        val maxCutoff = 16000f
         var i = 0
 
         while (i < size - 3) {
@@ -230,21 +226,33 @@ class RawAudioPlayer {
             val b3 = bytes[i + 3].toInt() and 0xFF
             val sampleR = (b2 or (b3 shl 8)).toShort() / 32768f
 
-            val lfoValue = (sin(lfoPhase) + 1.0f) / 2.0f
-            val leftCutoff = minCutoff + (maxCutoff - minCutoff) * lfoValue
-            val rightCutoff = maxCutoff - (maxCutoff - minCutoff) * lfoValue
+            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
+            
+            // Left ear gets Low frequencies when swing is 0, High when swing is 1
+            // Right ear gets High frequencies when swing is 0, Low when swing is 1
+            val leftCutoff = minCutoff + (maxCutoff - minCutoff) * swing
+            val rightCutoff = maxCutoff - (maxCutoff - minCutoff) * swing
 
+            // Calculate filter coefficients
             val alphaL = 1.0f - exp(-2.0f * PI.toFloat() * leftCutoff / sampleRate)
             val alphaR = 1.0f - exp(-2.0f * PI.toFloat() * rightCutoff / sampleRate)
 
-            val filteredL = leftPrevSample + alphaL * (sampleL - leftPrevSample)
-            val filteredR = rightPrevSample + alphaR * (sampleR - rightPrevSample)
-            leftPrevSample = filteredL
-            rightPrevSample = filteredR
+            // Apply 2-Pole Filter (Cascading two 1-pole filters for sharper separation)
+            // Pole 1
+            val tempL1 = leftPrevSample + alphaL * (sampleL - leftPrevSample)
+            val tempR1 = rightPrevSample + alphaR * (sampleR - rightPrevSample)
+            leftPrevSample = tempL1
+            rightPrevSample = tempR1
 
-            // Wet/dry mix: depth=0 -> dry, depth=1 -> fully filtered
-            val outL = sampleL + depth * (filteredL - sampleL)
-            val outR = sampleR + depth * (filteredR - sampleR)
+            // Pole 2 (Makes the "muffled" sound much mudier and the "bright" sound much sharper)
+            val tempL2 = leftPrevSample2 + alphaL * (tempL1 - leftPrevSample2)
+            val tempR2 = rightPrevSample2 + alphaR * (tempR1 - rightPrevSample2)
+            leftPrevSample2 = tempL2
+            rightPrevSample2 = tempR2
+
+            // Mix dry/wet based on depth
+            val outL = sampleL + depth * (tempL2 - sampleL)
+            val outR = sampleR + depth * (tempR2 - sampleR)
 
             val shortL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (shortL.toInt() and 0xFF).toByte()
