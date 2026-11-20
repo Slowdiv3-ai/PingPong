@@ -1071,6 +1071,10 @@ class PlayerViewModel @Inject constructor(
     
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // 1. MUTE EXOPLAYER IMMEDIATELY. This must be the very first thing 
+            // to prevent the 1-second unprocessed audio leak.
+            controller?.volume = 0f
+            
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
@@ -1083,22 +1087,22 @@ class PlayerViewModel @Inject constructor(
             val uri = mediaItem?.localConfiguration?.uri
             currentTrackUri = uri
 
-            // FIX 1: ONLY start DSP if the player is ACTUALLY playing. 
-            // This completely prevents the last song from auto-playing on launch.
             if (id != null && uri != null && controller?.isPlaying == true) {
                 val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
                     ?: currentState.tracks.find { it.id.toString() == id }
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
+                    rawPlayer.playUri(context, uri, 0L,
+                        onError = { msg -> 
+                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
+                            // Fallback: only unmute if DSP completely fails to start
+                            controller?.volume = 1f 
+                        },
                         onSuccess = { }
                     )
-                    controller?.volume = 0f
                 }
             } else {
-                // Ensure DSP is stopped if not playing
                 rawPlayer.stop()
             }
         }
@@ -1110,13 +1114,15 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
+                // 2. Ensure ExoPlayer is muted the exact moment it resumes playing
+                controller?.volume = 0f
+                
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
                         onSuccess = { }
                     )
-                    controller?.volume = 0f
                 }
             } else {
                 rawPlayer.pause()
@@ -1124,19 +1130,19 @@ class PlayerViewModel @Inject constructor(
         }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-    if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-        val uri = currentTrackUri
-        if (uri != null && controller?.isPlaying == true) {
-            android.util.Log.d("RawAudioPlayer", "Seek detected. Restarting player at ${newPosition.positionMs}ms")
-            // This triggers the safe stop() and fresh start inside playUri!
-            rawPlayer.playUri(context, uri, newPosition.positionMs,
-                onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
-                onSuccess = { }
-            )
-            controller?.volume = 0f
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                // 3. Ensure ExoPlayer stays muted during seeks
+                controller?.volume = 0f
+                
+                val uri = currentTrackUri
+                if (uri != null) {
+                    rawPlayer.playUri(context, uri, newPosition.positionMs,
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
+                        onSuccess = { }
+                    )
+                }
+            }
         }
-    }
- }
         
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             controller?.let { c ->
