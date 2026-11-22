@@ -1079,13 +1079,27 @@ class PlayerViewModel @Inject constructor(
     }
 
     private val listener = object : Player.Listener {
-        
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // CRITICAL: Mute ExoPlayer INSTANTLY. This is the first line to prevent any leak.
             controller?.volume = 0f 
-            reduce {
-                if (track != null) {
             
+            reduce {
+                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
+            }
+            loadCover(mediaItem)
+            loadTech(mediaItem)
+            loadLyrics(mediaItem)
+            loadLiked(mediaItem)
+
+            val id = mediaItem?.mediaId
+            val uri = mediaItem?.localConfiguration?.uri
+            currentTrackUri = uri
+
+            if (id != null && uri != null) {
+                val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+                    ?: currentState.tracks.find { it.id.toString() == id }
+                
+                if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
                     
                     // ONLY crossfade on AUTO transition (next song) or REPEAT. 
