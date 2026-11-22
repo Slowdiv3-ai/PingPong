@@ -48,7 +48,6 @@ class RawAudioPlayer {
     @Volatile private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
     
-    // This is the ONLY shared reference, used for refreshAudioTrack()
     @Volatile private var currentAudioTrack: AudioTrack? = null
 
     private var fadeInGain = 0.0f
@@ -70,7 +69,6 @@ class RawAudioPlayer {
         val oldThread = playbackThread
         if (oldThread != null) {
             oldThread.interrupt()
-            // Give the old thread enough time to finish any blocked write() calls
             try { oldThread.join(1500) } catch (_: Exception) {}
         }
 
@@ -88,7 +86,6 @@ class RawAudioPlayer {
         djLowL = 0.0f; djLowR = 0.0f
 
         playbackThread = Thread {
-            // CRITICAL FIX: Each thread gets its OWN local resources.
             var localExtractor: MediaExtractor? = null
             var localCodec: MediaCodec? = null
             var localAudioTrack: AudioTrack? = null
@@ -132,7 +129,6 @@ class RawAudioPlayer {
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                     .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
                 
-                // Update the shared reference so refreshAudioTrack() can find it
                 currentAudioTrack = localAudioTrack
                 localAudioTrack.play()
 
@@ -185,7 +181,6 @@ class RawAudioPlayer {
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
                             
-                            // Write to the LOCAL track, not the shared one
                             localAudioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                         }
                         localCodec.releaseOutputBuffer(outputBufferIndex, false)
@@ -198,11 +193,15 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
-                // CRITICAL FIX: Release the LOCAL resources. 
-                // This ensures the old thread doesn't kill the new thread's AudioTrack!
                 try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
                 try { localExtractor?.release() } catch (_: Exception) {}
-                try { localAudioTrack?.stop(); localAudioTrack?.release() } catch (_: Exception) {}
+                try { 
+                    // CRITICAL FIX: Clear the global reference if this thread owns it
+                    if (currentAudioTrack === localAudioTrack) {
+                        currentAudioTrack = null
+                    }
+                    localAudioTrack?.stop(); localAudioTrack?.release() 
+                } catch (_: Exception) {}
             }
         }
         playbackThread?.start()
@@ -364,35 +363,31 @@ class RawAudioPlayer {
         }
     }
 
+    // --- SAFE LIFECYCLE METHODS ---
     fun pause() { 
         isPaused = true
-        currentAudioTrack?.pause() 
+        val track = currentAudioTrack
+        try {
+            if (track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                track.pause()
+            }
+        } catch (_: Exception) {}
     }
     
     fun resume() { 
         isPaused = false
-        currentAudioTrack?.play() 
+        val track = currentAudioTrack
+        try {
+            if (track != null && track.playState == AudioTrack.PLAYSTATE_PAUSED) {
+                track.play()
+            }
+        } catch (_: Exception) {}
     }
 
     fun refreshAudioTrack() {
         val track = currentAudioTrack
-        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
-            try { track.stop(); track.release() } catch (_: Exception) {}
-            // Note: refreshAudioTrack is risky during playback, but we do our best here
-        } else if (track != null) {
-            track.play()
-        }
-    }
-
-    @Synchronized
-    fun stop() {
-        isPlaying = false
-        val thread = playbackThread
-        if (thread != null) {
-            thread.interrupt()
-            try { thread.join(1500) } catch (_: InterruptedException) {}
-        }
-        playbackThread = null
-        currentAudioTrack = null
-    }
-}
+        try {
+            if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
+                track.stop(); track.release()
+                // Note: Full recreation is risky mid-playback, but we do our best
+     
