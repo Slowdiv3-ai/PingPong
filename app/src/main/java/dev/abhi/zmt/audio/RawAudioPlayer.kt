@@ -41,37 +41,46 @@ class RawAudioPlayer {
     @Volatile private var fadeOutStartMs = 0L
     @Volatile private var fadeOutDurationMs = 0L
 
+    // Shared filter state for Frequency / Telephone (NOT used by Lo-Fi anymore)
     private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
     private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
     private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
+
+    // DEDICATED filter state for Lo-Fi smoothing (prevents collision)
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
+    private var lofiSmoothL = 0.0f; private var lofiSmoothR = 0.0f
     private var lofiCounter = 0
 
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
     @Volatile private var outgoingThread: Thread? = null
+
+    // Continuous LFO phase, advanced ONCE per buffer in decodeAndPlay
     private var lfoPhase = 0.0f
+
     @Volatile private var currentAudioTrack: AudioTrack? = null
 
     private fun resetFilters() {
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
+        lofiHoldL = 0.0f; lofiHoldR = 0.0f
+        lofiSmoothL = 0.0f; lofiSmoothR = 0.0f
         lofiCounter = 0
         lfoPhase = 0.0f
     }
 
     @Synchronized
     fun playUri(
-        context: Context, 
-        uri: Uri, 
-        startTimeMs: Long = 0, 
-        crossfadeSeconds: Int = 0, 
-        onError: (String) -> Unit, 
+        context: Context,
+        uri: Uri,
+        startTimeMs: Long = 0,
+        crossfadeSeconds: Int = 0,
+        onError: (String) -> Unit,
         onSuccess: () -> Unit
     ) {
         Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
-        
+
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
         val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
 
@@ -80,9 +89,8 @@ class RawAudioPlayer {
             outgoingThread = playbackThread
             fadeOutStartMs = System.currentTimeMillis()
             fadeOutDurationMs = fadeDurationMs
-            
             val fadeInStartMs = System.currentTimeMillis() + (fadeDurationMs / 2)
-            
+
             playbackThread = Thread {
                 try {
                     Thread.sleep(fadeDurationMs / 2)
@@ -110,7 +118,7 @@ class RawAudioPlayer {
     }
 
     private fun decodeAndPlay(
-        context: Context, uri: Uri, startTimeMs: Long, 
+        context: Context, uri: Uri, startTimeMs: Long,
         fadeInStartMs: Long, fadeInDurationMs: Long,
         onError: (String) -> Unit, onSuccess: () -> Unit
     ) {
@@ -156,28 +164,26 @@ class RawAudioPlayer {
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-            
+
             if (Thread.currentThread() !== outgoingThread) currentAudioTrack = localAudioTrack
             localAudioTrack.play()
 
             val bufferInfo = MediaCodec.BufferInfo()
             var sawInputEOS = false
             var sawOutputEOS = false
-            
+
             var lastSwitchTime = System.currentTimeMillis()
             var currentCustomIndex = 0
-            
-            // Seamless Preset Overlap Variables
+
             var outgoingPreset: PanPreset? = null
             var transitionProgress = 1.0f
-            val transitionDurationMs = 1200L // 1.2 seconds smooth morph between effects
+            val transitionDurationMs = 1200L
 
             val isOutgoing = Thread.currentThread() === outgoingThread
 
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
 
-                // 1. Handle Preset Cycling & Overlap Timing
                 if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty() && !customModeIsLayered) {
                     val now = System.currentTimeMillis()
                     if (now - lastSwitchTime > intervalSeconds * 1000) {
@@ -186,19 +192,16 @@ class RawAudioPlayer {
                         currentPreset = customPresets[currentCustomIndex]
                         lastSwitchTime = now
                         transitionProgress = 0.0f
-                        resetFilters() // Prevents filter state corruption during overlap
+                        resetFilters()
                         Log.d(TAG, "🔄 Morphing from $outgoingPreset to $currentPreset")
                     }
-
                     if (outgoingPreset != null) {
-                        val now2 = System.currentTimeMillis()
-                        val elapsed = now2 - lastSwitchTime
+                        val elapsed = System.currentTimeMillis() - lastSwitchTime
                         transitionProgress = (elapsed.toFloat() / transitionDurationMs).coerceIn(0f, 1f)
                         if (transitionProgress >= 1.0f) outgoingPreset = null
                     }
                 }
 
-                // 2. Calculate Track Crossfade Gain
                 var currentGain = 1.0f
                 if (isOutgoing) {
                     val elapsed = System.currentTimeMillis() - fadeOutStartMs
@@ -257,7 +260,6 @@ class RawAudioPlayer {
                                     currentPreset = oldPreset
                                 }
                             } else {
-                                // SEAMLESS PRESET OVERLAP LOGIC
                                 if (outgoingPreset != null && transitionProgress < 1.0f) {
                                     val bytesB = bytes.copyOf()
                                     applySinglePreset(outgoingPreset!!, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
@@ -267,11 +269,8 @@ class RawAudioPlayer {
                                     applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
                                 }
                             }
-                            
-                            // Apply track crossfade gain at the very end
-                            if (currentGain < 1.0f) {
-                                applyFade(bytes, bufferInfo.size, currentGain)
-                            }
+
+                            if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
                         } else {
                             when (currentMode) {
                                 PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
@@ -283,32 +282,33 @@ class RawAudioPlayer {
                                 PanMode.CUSTOM -> applyFade(bytes, bufferInfo.size, currentGain)
                             }
                         }
-                        
+
+                        // CRITICAL FIX: advance the LFO exactly ONCE per buffer
+                        lfoPhase += (bufferInfo.size / 4) * lfoStep
+                        while (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+
                         localAudioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                     }
                     localCodec.releaseOutputBuffer(outputBufferIndex, false)
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
-                } else { 
-                    Thread.sleep(20) 
+                } else {
+                    Thread.sleep(20)
                 }
             }
-            
-            if (!isOutgoing) {
-                Handler(Looper.getMainLooper()).post { onSuccess() }
-            }
+
+            if (!isOutgoing) Handler(Looper.getMainLooper()).post { onSuccess() }
         } catch (e: Exception) {
             if (!isOutgoing) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
         } finally {
             try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
             try { localExtractor?.release() } catch (_: Exception) {}
-            try { 
+            try {
                 if (Thread.currentThread() !== outgoingThread && currentAudioTrack === localAudioTrack) currentAudioTrack = null
-                localAudioTrack?.stop(); localAudioTrack?.release() 
+                localAudioTrack?.stop(); localAudioTrack?.release()
             } catch (_: Exception) {}
         }
     }
 
-    // --- HELPER FUNCTIONS FOR SEAMLESS OVERLAP ---
     private fun applySinglePreset(preset: PanPreset, bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float) {
         when (preset) {
             PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, size, lfoStep, gain)
@@ -328,14 +328,10 @@ class RawAudioPlayer {
             val sR_A = (bytesA[i+2].toInt() and 0xFF or ((bytesA[i+3].toInt() and 0xFF) shl 8)).toShort()
             val sL_B = (bytesB[i].toInt() and 0xFF or ((bytesB[i+1].toInt() and 0xFF) shl 8)).toShort()
             val sR_B = (bytesB[i+2].toInt() and 0xFF or ((bytesB[i+3].toInt() and 0xFF) shl 8)).toShort()
-
             val outL = (sL_A * invP + sL_B * p).toInt().toShort()
             val outR = (sR_A * invP + sR_B * p).toInt().toShort()
-
-            bytesA[i] = (outL.toInt() and 0xFF).toByte()
-            bytesA[i+1] = (outL.toInt() shr 8).toByte()
-            bytesA[i+2] = (outR.toInt() and 0xFF).toByte()
-            bytesA[i+3] = (outR.toInt() shr 8).toByte()
+            bytesA[i] = (outL.toInt() and 0xFF).toByte(); bytesA[i+1] = (outL.toInt() shr 8).toByte()
+            bytesA[i+2] = (outR.toInt() and 0xFF).toByte(); bytesA[i+3] = (outR.toInt() shr 8).toByte()
             i += 4
         }
     }
@@ -353,12 +349,14 @@ class RawAudioPlayer {
         }
     }
 
+    // Each effect now uses a LOCAL phase copy and does NOT touch the global lfoPhase.
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float) {
         var i = 0
+        var phase = lfoPhase
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val swing = sin(lfoPhase); val pan = swing * depth
+            val swing = sin(phase); val pan = swing * depth
             val leftGain = (1.0f - maxOf(0f, pan)) * gain
             val rightGain = (1.0f + minOf(0f, pan)) * gain
             val outL = sampleL * leftGain; val outR = sampleR * rightGain
@@ -366,16 +364,17 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
     private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float) {
         var i = 0
+        var phase = lfoPhase
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val swing = (sin(lfoPhase) + 1.0f) / 2.0f
+            val swing = (sin(phase) + 1.0f) / 2.0f
             var outL = sampleL; var outR = sampleR
             if (currentPreset == PanPreset.FREQ_UNDERWATER) {
                 val logMin = ln(200f); val logMax = ln(16000f)
@@ -398,16 +397,17 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
     private fun applyTremolo(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float) {
         var i = 0
+        var phase = lfoPhase
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            var lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
+            var lfoVal = (sin(phase) + 1.0f) / 2.0f
             if (currentPreset == PanPreset.TREMOLO_SQUARE) lfoVal = if (lfoVal > 0.5f) 1f else 0f
             val effectGain = (0.3f + (0.7f * lfoVal * depth)) * gain
             val outL = sampleL * effectGain; val outR = sampleR * effectGain
@@ -415,10 +415,12 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
+    // Lo-Fi now uses its OWN smoothing state (lofiSmoothL/R) so it no longer collides
+    // with the Frequency/Telephone filters. It also no longer advances the global phase.
     private fun applyLoFi(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float) {
         var i = 0
         val bits = if (currentPreset == PanPreset.LOFI_4BIT) 4 else 8
@@ -434,26 +436,27 @@ class RawAudioPlayer {
                 lofiHoldR = (sampleR * levels).toInt().toFloat() / levels
             }
             val alpha = 0.2f
-            val smoothL = leftPrevLow + alpha * (lofiHoldL - leftPrevLow); leftPrevLow = smoothL
-            val smoothR = rightPrevLow + alpha * (lofiHoldR - rightPrevLow); rightPrevLow = smoothR
+            val smoothL = lofiSmoothL + alpha * (lofiHoldL - lofiSmoothL); lofiSmoothL = smoothL
+            val smoothR = lofiSmoothR + alpha * (lofiHoldR - lofiSmoothR); lofiSmoothR = smoothR
             val outL = smoothL * gain; val outR = smoothR * gain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (smoothR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+            i += 4
         }
     }
 
     private fun applyTelephone(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float) {
         var i = 0
+        var phase = lfoPhase
         val baseHighCut = if (currentPreset == PanPreset.TEL_VINTAGE) 2500f else 3500f
         val baseLowCut = 300f
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val currentHighCut = baseHighCut + (4000f * depth * ((sin(lfoPhase) + 1.0f) / 2.0f))
-            val currentLowCut = baseLowCut + (1500f * depth * ((sin(lfoPhase) + 1.0f) / 2.0f))
+            val currentHighCut = baseHighCut + (4000f * depth * ((sin(phase) + 1.0f) / 2.0f))
+            val currentLowCut = baseLowCut + (1500f * depth * ((sin(phase) + 1.0f) / 2.0f))
             val alphaLow = 1.0f - exp(-2.0f * PI.toFloat() * currentHighCut / sampleRate)
             val alphaHigh = exp(-2.0f * PI.toFloat() * currentLowCut / sampleRate)
             val lpL = leftPrevLow + alphaLow * (sampleL - leftPrevLow); leftPrevLow = lpL
@@ -466,20 +469,20 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
+            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
-    fun pause() { 
+    fun pause() {
         val track = currentAudioTrack
         try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause() } catch (_: Exception) {}
     }
-    
-    fun resume() { 
+
+    fun resume() {
         val track = currentAudioTrack
         try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PAUSED) track.play() } catch (_: Exception) {}
     }
-    
+
     fun refreshAudioTrack() {
         val track = currentAudioTrack
         try { if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) { track.stop(); track.release() } else if (track != null) track.play() } catch (_: Exception) {}
