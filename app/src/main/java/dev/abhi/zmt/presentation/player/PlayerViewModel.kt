@@ -1116,10 +1116,13 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                controller?.volume = 0f // Ensure ExoPlayer stays muted
+                controller?.volume = 0f
+                // CRITICAL: Force ExoPlayer to play so the UI doesn't show "paused"
+                if (controller?.isPlaying == false) {
+                    controller?.play()
+                }
                 val uri = currentTrackUri
                 if (uri != null) {
-                    // PASS 0 for crossfade on resume to prevent double-thread distortion!
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
                         onSuccess = { }
@@ -1127,7 +1130,7 @@ class PlayerViewModel @Inject constructor(
                 }
             } else {
                 rawPlayer.pause()
-                controller?.pause() // CRITICAL: Ensure ExoPlayer is also paused so it doesn't run in the background
+                controller?.pause() // Ensure ExoPlayer is also paused
             }
         }
         
@@ -1137,9 +1140,14 @@ class PlayerViewModel @Inject constructor(
             }
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 controller?.volume = 0f
+                
+                // CRITICAL: Force ExoPlayer to play so the UI doesn't show "paused" during seek
+                if (controller?.isPlaying == false) {
+                    controller?.play()
+                }
+
                 val uri = currentTrackUri
                 if (uri != null) {
-                    // PASS 0 for crossfade on seek to prevent double-thread distortion!
                     rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
