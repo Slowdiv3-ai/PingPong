@@ -1130,12 +1130,13 @@ class PlayerViewModel @Inject constructor(
             }
         }
         
-        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 controller?.volume = 0f
                 val uri = currentTrackUri
                 if (uri != null) {
-                    rawPlayer.playUri(context, uri, newPosition.positionMs, 1, // 1 second fast fade for seeks
+                    // PASS 0 for crossfadeSeconds to make seeking instant without the DJ fade effect
+                    rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
                     )
