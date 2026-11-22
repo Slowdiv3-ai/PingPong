@@ -1143,19 +1143,25 @@ class PlayerViewModel @Inject constructor(
         }
         
                 override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                controller?.volume = 0f
-            }
-            if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_SEEK) {
-                controller?.volume = 0f
-                // CRITICAL: Force ExoPlayer to play so the UI doesn't show "paused" during seek
-                if (controller?.isPlaying == false) controller?.play()
+            // CRITICAL: Mute ExoPlayer on ALL discontinuities (auto-transition, seek, etc.)
+            controller?.volume = 0f
+            
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                // Force ExoPlayer to play during seek to keep the UI alive and synced
+                if (controller?.isPlaying == false) {
+                    controller?.play()
+                }
                 
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
-                        onSuccess = { }
+                        onError = { msg -> 
+                            android.util.Log.e("RawAudioPlayer", "Seek error: $msg")
+                            controller?.volume = 1f // Fallback unmute
+                        },
+                        onSuccess = { 
+                            controller?.volume = 0f // Ensure muted after success
+                        }
                     )
                 }
             }
