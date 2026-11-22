@@ -248,8 +248,8 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
             AsciiSlider(
                 value = interval, 
                 min = 2.0f, 
-                max = 30.0f, 
-                steps = 28, 
+                max = 120.0f, // Changed to 2 minutes
+                steps = 118,  // 118 steps gives you exactly 1-second increments
                 onValueChange = { newInterval -> rawPlayer?.intervalSeconds = newInterval }
             )
         }
