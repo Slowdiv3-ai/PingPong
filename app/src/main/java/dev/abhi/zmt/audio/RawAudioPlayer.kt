@@ -116,14 +116,13 @@ class RawAudioPlayer {
         fadeInStartMs: Long, fadeInDurationMs: Long,
         onError: (String) -> Unit, onSuccess: () -> Unit
     ) {
+        // Ensure a clean slate for every new track
+        resetFilters()
+
         var localExtractor: MediaExtractor? = null
         var localCodec: MediaCodec? = null
         var localAudioTrack: AudioTrack? = null
 
-        // =====================================================================
-        // BULLETPROOF FIX: Declared at the function level. 
-        // This guarantees it is 100% in scope for the try, catch, and finally blocks.
-        // =====================================================================
         val isOutgoing = Thread.currentThread() == outgoingThread
 
         try {
@@ -190,13 +189,19 @@ class RawAudioPlayer {
                         currentPreset = customPresets[currentCustomIndex]
                         lastSwitchTime = now
                         transitionProgress = 0.0f
-                        resetFilters()
+                        
+                        // CRITICAL FIX: DO NOT call resetFilters() here! 
+                        // Snapping filter states and LFO phase to 0 mid-stream causes the "electric shock" pop.
+                        // Letting them run continuously ensures a perfectly smooth morph.
+                        
                         Log.d(TAG, "🔄 Morphing from $outgoingPreset to $currentPreset")
                     }
                     if (outgoingPreset != null) {
                         val elapsed = System.currentTimeMillis() - lastSwitchTime
                         transitionProgress = (elapsed.toFloat() / transitionDurationMs).coerceIn(0f, 1f)
-                        if (transitionProgress >= 1.0f) outgoingPreset = null
+                        if (transitionProgress >= 1.0f) {
+                            outgoingPreset = null
+                        }
                     }
                 }
 
@@ -303,7 +308,6 @@ class RawAudioPlayer {
             try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
             try { localExtractor?.release() } catch (_: Exception) {}
             try { 
-                // Now we can safely use !isOutgoing here without any scope issues
                 if (!isOutgoing && currentAudioTrack === localAudioTrack) currentAudioTrack = null
                 localAudioTrack?.stop(); localAudioTrack?.release() 
             } catch (_: Exception) {}
