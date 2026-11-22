@@ -196,7 +196,6 @@ class RawAudioPlayer {
                 try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
                 try { localExtractor?.release() } catch (_: Exception) {}
                 try { 
-                    // CRITICAL FIX: Clear the global reference if this thread owns it
                     if (currentAudioTrack === localAudioTrack) {
                         currentAudioTrack = null
                     }
@@ -363,7 +362,6 @@ class RawAudioPlayer {
         }
     }
 
-    // --- SAFE LIFECYCLE METHODS ---
     fun pause() { 
         isPaused = true
         val track = currentAudioTrack
@@ -389,5 +387,21 @@ class RawAudioPlayer {
         try {
             if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
                 track.stop(); track.release()
-                // Note: Full recreation is risky mid-playback, but we do our best
-     
+            } else if (track != null) {
+                track.play()
+            }
+        } catch (_: Exception) {}
+    }
+
+    @Synchronized
+    fun stop() {
+        isPlaying = false
+        val thread = playbackThread
+        if (thread != null) {
+            thread.interrupt()
+            try { thread.join(1500) } catch (_: InterruptedException) {}
+        }
+        playbackThread = null
+        currentAudioTrack = null
+    }
+} // <--- CRITICAL: THIS IS THE FINAL CLOSING BRACE FOR THE CLASS
