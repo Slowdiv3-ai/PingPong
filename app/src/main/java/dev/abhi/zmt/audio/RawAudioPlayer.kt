@@ -40,12 +40,15 @@ class RawAudioPlayer {
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
+    // DJ Fade Filter States
+    private var djLowL = 0.0f
+    private var djLowR = 0.0f
+
     @Volatile private var isPlaying = false
     @Volatile private var isPaused = false
     @Volatile private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
     
-    // FIXED: Declared at class level so it is in scope everywhere
     private var audioTrack: AudioTrack? = null
 
     private var fadeInGain = 0.0f
@@ -77,10 +80,12 @@ class RawAudioPlayer {
         fadeInTarget = 1.0f
         fadeIncrement = if (crossfadeSeconds > 0) 1.0f / (crossfadeSeconds * 40) else 1.0f
         
+        // Reset all filter states
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
         lofiCounter = 0
+        djLowL = 0.0f; djLowR = 0.0f // Reset DJ filter
 
         playbackThread = Thread {
             var extractor: MediaExtractor? = null
@@ -120,8 +125,6 @@ class RawAudioPlayer {
                 codec.start()
 
                 val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-                
-                // FIXED: Assign to class-level variable
                 audioTrack = AudioTrack.Builder()
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
@@ -136,6 +139,7 @@ class RawAudioPlayer {
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
                     
+                    // Update fade gain
                     if (fadeInGain < fadeInTarget) {
                         fadeInGain += fadeIncrement
                         if (fadeInGain > fadeInTarget) fadeInGain = fadeInTarget
@@ -165,6 +169,11 @@ class RawAudioPlayer {
                             outputBuffer.get(bytes)
                             val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
+                            // 🎧 DJ CROSSFADE: Apply lowpass sweep while fading in
+                            if (fadeInGain < 1.0f) {
+                                applyDjLowpass(bytes, bufferInfo.size, actualSampleRate)
+                            }
+
                             when (currentMode) {
                                 PanMode.OFF -> applyFade(bytes, bufferInfo.size)
                                 PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep)
@@ -191,6 +200,31 @@ class RawAudioPlayer {
             }
         }
         playbackThread?.start()
+    }
+
+    // 🎧 DJ LOWPASS SWEEP: Muffled (150Hz) to Clear (16000Hz) based on fadeInGain
+    private fun applyDjLowpass(bytes: ByteArray, size: Int, sampleRate: Int) {
+        var i = 0
+        val logMin = ln(150f)
+        val logMax = ln(16000f)
+        val currentLogCutoff = logMin + (logMax - logMin) * fadeInGain
+        val cutoff = exp(currentLogCutoff)
+        val alpha = 1.0f - exp(-2.0f * PI.toFloat() * cutoff / sampleRate)
+        
+        while (i < size - 3) {
+            val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
+            val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
+            
+            val lowL = djLowL + alpha * (sampleL - djLowL); djLowL = lowL
+            val lowR = djLowR + alpha * (sampleR - djLowR); djLowR = lowR
+            
+            // We only apply the filter here. The volume fade is applied by the effect functions below.
+            val sL = (lowL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
+            val sR = (lowR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
+            i += 4
+        }
     }
 
     private fun applyFade(bytes: ByteArray, size: Int) {
