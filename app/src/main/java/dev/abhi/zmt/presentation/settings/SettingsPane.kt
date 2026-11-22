@@ -58,7 +58,8 @@ fun nextCoverCols(current: Int): Int = COVER_COLS_STEPS[(COVER_COLS_STEPS.indexO
 @Composable
 fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawAudioPlayer? = null) {
     val settings = state.settings
-    val on = stringResource(R.string.on); val off = stringResource(R.string.off)
+    val on = stringResource(R.string.on)
+    val off = stringResource(R.string.off)
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Caption(stringResource(R.string.section_playback))
@@ -78,132 +79,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
         SettingRow(label = stringResource(R.string.set_specs), value = if (settings.listSpecs) on else off) { dispatch(DmtAction.Config(settings.copy(listSpecs = !settings.listSpecs))) }
         AccentRow(settings = settings, dispatch = dispatch)
 
-// ==========================================
-        // --- PingPong DSP Section ---
         // ==========================================
-        Caption("pingpong dsp")
-        
-        // FIX 1: Changed 'val' to 'var' so the UI can actually update when clicked
-        var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
-        var currentPreset by remember { mutableStateOf(rawPlayer?.currentPreset ?: RawAudioPlayer.PanPreset.VOL_SMOOTH) }
-
-        val modeLabel = when (currentMode) {
-            RawAudioPlayer.PanMode.OFF -> "off"
-            RawAudioPlayer.PanMode.VOLUME -> "volume"
-            RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
-            RawAudioPlayer.PanMode.TREMOLO -> "tremolo"
-            RawAudioPlayer.PanMode.LOFI -> "lo-fi"
-            RawAudioPlayer.PanMode.TELEPHONE -> "telephone"
-        }
-
-        SettingRow(label = "dsp mode", value = modeLabel) {
-            rawPlayer?.let { player ->
-                player.currentMode = when (player.currentMode) {
-                    RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
-                    RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
-                    RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.TREMOLO
-                    RawAudioPlayer.PanMode.TREMOLO -> RawAudioPlayer.PanMode.LOFI
-                    RawAudioPlayer.PanMode.LOFI -> RawAudioPlayer.PanMode.TELEPHONE
-                    RawAudioPlayer.PanMode.TELEPHONE -> RawAudioPlayer.PanMode.OFF
-                }
-                // FIX 2: Force the UI to refresh instantly
-                currentMode = player.currentMode 
-            }
-        }
-
-        // FIX 3: Use the local 'currentPreset' variable instead of reading from the player directly
-        val presetLabel = when (currentPreset) {
-            RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
-            RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
-            RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
-            RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> "helicopter"
-            RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> "deep bass"
-            RawAudioPlayer.PanPreset.FREQ_HI_HATS -> "hi-hats"
-            RawAudioPlayer.PanPreset.FREQ_UNDERWATER -> "underwater"
-            RawAudioPlayer.PanPreset.TREMOLO_SINE -> "sine wave"
-            RawAudioPlayer.PanPreset.TREMOLO_SQUARE -> "square wave"
-            RawAudioPlayer.PanPreset.LOFI_8BIT -> "8-bit"
-            RawAudioPlayer.PanPreset.LOFI_4BIT -> "4-bit"
-            RawAudioPlayer.PanPreset.TEL_VINTAGE -> "vintage"
-            RawAudioPlayer.PanPreset.TEL_RADIO -> "radio"
-            else -> "unknown"
-        }
-
-        SettingRow(label = "dsp preset", value = presetLabel) {
-            rawPlayer?.let { player ->
-                player.currentPreset = when (player.currentMode) {
-                    RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
-                        RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
-                        RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
-                        RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                        else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-
-// ==========================================
-        // --- PingPong DSP Section ---
-        // ==========================================
-        Caption("pingpong dsp")
-        
-        var currentMode by remember { mutableStateOf(rawPlayer?.currentMode ?: RawAudioPlayer.PanMode.OFF) }
-        var currentPreset by remember { mutableStateOf(rawPlayer?.currentPreset ?: RawAudioPlayer.PanPreset.VOL_SMOOTH) }
-
-        val modeLabel = when (currentMode) {
-            RawAudioPlayer.PanMode.OFF -> "off"
-            RawAudioPlayer.PanMode.VOLUME -> "volume"
-            RawAudioPlayer.PanMode.FREQUENCY -> "frequency"
-            RawAudioPlayer.PanMode.TREMOLO -> "tremolo"
-            RawAudioPlayer.PanMode.LOFI -> "lo-fi"
-            RawAudioPlayer.PanMode.TELEPHONE -> "telephone"
-            RawAudioPlayer.PanMode.CUSTOM -> "custom" // NEW
-        }
-
-        SettingRow(label = "dsp mode", value = modeLabel) {
-            rawPlayer?.let { player ->
-                player.currentMode = when (player.currentMode) {
-                    RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanMode.VOLUME
-                    RawAudioPlayer.PanMode.VOLUME -> RawAudioPlayer.PanMode.FREQUENCY
-                    RawAudioPlayer.PanMode.FREQUENCY -> RawAudioPlayer.PanMode.TREMOLO
-                    RawAudioPlayer.PanMode.TREMOLO -> RawAudioPlayer.PanMode.LOFI
-                    RawAudioPlayer.PanMode.LOFI -> RawAudioPlayer.PanMode.TELEPHONE
-                    RawAudioPlayer.PanMode.TELEPHONE -> RawAudioPlayer.PanMode.CUSTOM
-                    RawAudioPlayer.PanMode.CUSTOM -> RawAudioPlayer.PanMode.OFF
-                }
-                currentMode = player.currentMode 
-            }
-        }
-
-        // Only show preset selector if NOT in custom mode
-        if (currentMode != RawAudioPlayer.PanMode.CUSTOM) {
-            val presetLabel = when (currentPreset) {
-                RawAudioPlayer.PanPreset.VOL_SMOOTH -> "smooth"
-                RawAudioPlayer.PanPreset.VOL_GENTLE -> "gentle"
-                RawAudioPlayer.PanPreset.VOL_CHOP -> "chop"
-                RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> "helicopter"
-                RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> "deep bass"
-                RawAudioPlayer.PanPreset.FREQ_HI_HATS -> "hi-hats"
-                RawAudioPlayer.PanPreset.FREQ_UNDERWATER -> "underwater"
-                RawAudioPlayer.PanPreset.TREMOLO_SINE -> "sine wave"
-                RawAudioPlayer.PanPreset.TREMOLO_SQUARE -> "square wave"
-                RawAudioPlayer.PanPreset.LOFI_8BIT -> "8-bit"
-                RawAudioPlayer.PanPreset.LOFI_4BIT -> "4-bit"
-                RawAudioPlayer.PanPreset.TEL_VINTAGE -> "vintage"
-                RawAudioPlayer.PanPreset.TEL_RADIO -> "radio"
-                else -> "unknown"
-            }
-
-            SettingRow(label = "dsp preset", value = presetLabel) {
-                rawPlayer?.let { player ->
-                    player.currentPreset = when (player.currentMode) {
-                        RawAudioPlayer.PanMode.VOLUME -> when (player.currentPreset) {
-                            RawAudioPlayer.PanPreset.VOL_SMOOTH -> RawAudioPlayer.PanPreset.VOL_GENTLE
-                            RawAudioPlayer.PanPreset.VOL_GENTLE -> RawAudioPlayer.PanPreset.VOL_CHOP
-                            RawAudioPlayer.PanPreset.VOL_CHOP -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                            else -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                        }
-                        RawAudioPlayer.PanMode.FREQUENCY -> when (player.currentPreset) {
-                            RawAudioPlayer.PanPreset.FREQ_HELICOPTER -> RawAudioPlayer.PanPreset.FREQ_DEEP_BASS
-                            RawAudioPlayer.PanPreset.FREQ_DEEP_BASS -> RawAudioPlayer.PanPreset.FREQ_HI_HATS
-                            RawAudioPlayer.PanPreset.FREQ_HI_HATS -> RawAudioPlayer.PanPreset.FREQ_UNDERWATER
-// ==========================================
         // --- PingPong DSP Section ---
         // ==========================================
         Caption("pingpong dsp")
@@ -251,7 +127,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                 RawAudioPlayer.PanPreset.LOFI_4BIT -> "4-bit"
                 RawAudioPlayer.PanPreset.TEL_VINTAGE -> "vintage"
                 RawAudioPlayer.PanPreset.TEL_RADIO -> "radio"
-                else -> "unknown" // CRITICAL: 'else' MUST be the very last branch
+                else -> "unknown"
             }
 
             SettingRow(label = "dsp preset", value = presetLabel) {
@@ -274,14 +150,13 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                         RawAudioPlayer.PanMode.LOFI -> if (player.currentPreset == RawAudioPlayer.PanPreset.LOFI_8BIT) RawAudioPlayer.PanPreset.LOFI_4BIT else RawAudioPlayer.PanPreset.LOFI_8BIT
                         RawAudioPlayer.PanMode.TELEPHONE -> if (player.currentPreset == RawAudioPlayer.PanPreset.TEL_VINTAGE) RawAudioPlayer.PanPreset.TEL_RADIO else RawAudioPlayer.PanPreset.TEL_VINTAGE
                         RawAudioPlayer.PanMode.OFF -> RawAudioPlayer.PanPreset.VOL_SMOOTH
-                        RawAudioPlayer.PanMode.CUSTOM -> RawAudioPlayer.PanPreset.VOL_SMOOTH // Added CUSTOM case
+                        RawAudioPlayer.PanMode.CUSTOM -> RawAudioPlayer.PanPreset.VOL_SMOOTH
                     }
                     currentPreset = player.currentPreset
                 }
             }
         }
 
-        // --- CUSTOM MODE UI ---
         if (currentMode == RawAudioPlayer.PanMode.CUSTOM) {
             Caption("custom cycle presets")
             Text("Tap to toggle effects on/off", style = MaterialTheme.typography.labelSmall, color = TuiDim, modifier = Modifier.padding(bottom = 8.dp))
@@ -316,7 +191,6 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                 onValueChange = { newInterval -> rawPlayer?.intervalSeconds = newInterval }
             )
         }
-        // --- END CUSTOM MODE UI ---
 
         if (currentMode != RawAudioPlayer.PanMode.OFF) {
             val speed = rawPlayer?.lfoFreq ?: 0.5f
@@ -331,6 +205,7 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
             }
         }
         // ==========================================
+
         Caption(stringResource(R.string.tools))
         SettingRow(label = stringResource(R.string.set_eq_preset), value = state.equalizerPresetName) {
             val nextIndex = (state.equalizerPresetName.let { current -> EQ_PRESETS.indexOfFirst { it.first == current } } + 1).mod(EQ_PRESETS.size)
@@ -394,7 +269,8 @@ fun AsciiSlider(value: Float, min: Float, max: Float, steps: Int, onValueChange:
     val percentage = ((value - min) / (max - min)).coerceIn(0f, 1f)
     val filled = (percentage * steps).toInt()
     val empty = steps - filled
-    val filledChar = "█"; val emptyChar = "░"
+    val filledChar = "█"
+    val emptyChar = "░"
     val barText = "[" + filledChar.repeat(filled) + emptyChar.repeat(empty) + "]"
     Column(modifier = modifier.fillMaxWidth()) {
         Slider(value = value, onValueChange = onValueChange, valueRange = min..max, steps = steps - 1, modifier = Modifier.fillMaxWidth(), colors = SliderDefaults.colors(thumbColor = TuiAccent, activeTrackColor = TuiAccent, inactiveTrackColor = TuiLine))
