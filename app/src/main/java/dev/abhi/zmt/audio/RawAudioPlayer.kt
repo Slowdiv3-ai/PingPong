@@ -36,6 +36,13 @@ class RawAudioPlayer {
 
     @Volatile var customPresets: List<PanPreset> = emptyList()
     @Volatile var intervalSeconds: Float = 10f
+    @Volatile var customModeIsLayered: Boolean = false
+
+    // Dynamic Crossfade Variables
+    @Volatile var crossfadeDirection: Int = 0 // 0 = L->R, 1 = R->L
+    @Volatile var crossfadeFilterType: Int = 0 // 0 = Low Pulse, 1 = High Pulse
+    @Volatile var crossfadeSpeed: Float = 1.0f
+    @Volatile var crossfadeFilterIntensity: Float = 1.0f
 
     private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
     private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
@@ -43,8 +50,8 @@ class RawAudioPlayer {
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
-    private var djLowL = 0.0f
-    private var djLowR = 0.0f
+    private var djLowL = 0.0f; private var djLowR = 0.0f
+    private var crossfadePrevLowL = 0.0f; private var crossfadePrevLowR = 0.0f
 
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
@@ -62,6 +69,7 @@ class RawAudioPlayer {
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
         lofiCounter = 0
         djLowL = 0.0f; djLowR = 0.0f
+        crossfadePrevLowL = 0.0f; crossfadePrevLowR = 0.0f
         lfoPhase = 0.0f
     }
 
@@ -75,6 +83,11 @@ class RawAudioPlayer {
         onSuccess: () -> Unit
     ) {
         Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
+        
+        // Toggle direction and filter for dynamic crossfade
+        crossfadeDirection = 1 - crossfadeDirection
+        crossfadeFilterType = 1 - crossfadeFilterType
+        resetFilters() // Clear filter states for new track
         
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
 
@@ -175,13 +188,15 @@ class RawAudioPlayer {
                 if (Thread.currentThread().isInterrupted) break
 
                 if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastSwitchTime > intervalSeconds * 1000) {
-                        currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
-                        currentPreset = customPresets[currentCustomIndex]
-                        lastSwitchTime = now
-                        resetFilters()
-                        Log.d(TAG, "🔄 Switched to preset: $currentPreset")
+                    if (!customModeIsLayered) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastSwitchTime > intervalSeconds * 1000) {
+                            currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
+                            currentPreset = customPresets[currentCustomIndex]
+                            lastSwitchTime = now
+                            resetFilters()
+                            Log.d(TAG, "🔄 Cycled to preset: $currentPreset")
+                        }
                     }
                 }
 
@@ -216,30 +231,51 @@ class RawAudioPlayer {
                         outputBuffer.get(bytes)
                         val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
+                        // Apply Dynamic Crossfade if fading in
                         if (!isOutgoing && currentGain < 1.0f && fadeInDurationSec > 0) {
-                            applyDjLowpass(bytes, bufferInfo.size, actualSampleRate, currentGain)
+                            applyDynamicCrossfade(bytes, bufferInfo.size, actualSampleRate, currentGain)
                         }
 
-                        when (currentMode) {
-                            PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
-                            PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
-                            PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                            PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
-                            PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
-                            PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                            PanMode.CUSTOM -> {
-                                when (currentPreset) {
-                                    PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> 
-                                        applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
-                                    PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> 
-                                        applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                                    PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> 
-                                        applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
-                                    PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> 
-                                        applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
-                                    PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> 
-                                        applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
+                        if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
+                            if (customModeIsLayered) {
+                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
+                                if (customPresets.any { it.name.startsWith("FREQ_") }) {
+                                    val freqPreset = customPresets.first { it.name.startsWith("FREQ_") }
+                                    val oldPreset = currentPreset; currentPreset = freqPreset
+                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
+                                    currentPreset = oldPreset
                                 }
+                                if (customPresets.any { it.name.startsWith("TREMOLO_") }) {
+                                    val tremPreset = customPresets.first { it.name.startsWith("TREMOLO_") }
+                                    val oldPreset = currentPreset; currentPreset = tremPreset
+                                    applyTremolo(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    currentPreset = oldPreset
+                                }
+                                if (customPresets.any { it.name.startsWith("VOL_") }) {
+                                    val volPreset = customPresets.first { it.name.startsWith("VOL_") }
+                                    val oldPreset = currentPreset; currentPreset = volPreset
+                                    applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    currentPreset = oldPreset
+                                }
+                            } else {
+                                when (currentPreset) {
+                                    PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
+                                    PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
+                                }
+                            }
+                            if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
+                        } else {
+                            when (currentMode) {
+                                PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
+                                PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
+                                PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
+                                PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
+                                PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
+                                PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
                             }
                         }
                         
@@ -267,20 +303,61 @@ class RawAudioPlayer {
         }
     }
 
-    private fun applyDjLowpass(bytes: ByteArray, size: Int, sampleRate: Int, gain: Float) {
+    // --- NEW DYNAMIC CROSSFADE FUNCTION ---
+    private fun applyDynamicCrossfade(bytes: ByteArray, size: Int, sampleRate: Int, gain: Float) {
         var i = 0
-        val logMin = ln(150f); val logMax = ln(16000f)
-        val currentLogCutoff = logMin + (logMax - logMin) * gain
+        // Panning: 0.0 = Start, 1.0 = End
+        val pan = gain 
+        val leftPanGain: Float
+        val rightPanGain: Float
+        if (crossfadeDirection == 0) { // L -> R
+            leftPanGain = 1.0f - pan
+            rightPanGain = pan
+        } else { // R -> L
+            leftPanGain = pan
+            rightPanGain = 1.0f - pan
+        }
+
+        // Filter Logic
+        val intensity = crossfadeFilterIntensity
+        val logMin = ln(200f)
+        val logMax = ln(16000f)
+        val effectiveGain = gain * intensity + (1f - intensity) // Blends between no filter and full sweep
+        
+        val currentLogCutoff: Float
+        if (crossfadeFilterType == 0) { // Low Pulse (Lowpass)
+            currentLogCutoff = logMin + (logMax - logMin) * effectiveGain
+        } else { // High Pulse (Highpass)
+            currentLogCutoff = logMax - (logMax - logMin) * effectiveGain
+        }
+
         val cutoff = exp(currentLogCutoff)
-        val alpha = 1.0f - exp(-2.0f * PI.toFloat() * cutoff / sampleRate)
+        val alpha = (1.0f - exp(-2.0f * PI.toFloat() * cutoff / sampleRate)).coerceIn(0.0001f, 0.9999f)
+
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            val lowL = djLowL + alpha * (sampleL - djLowL); djLowL = lowL
-            val lowR = djLowR + alpha * (sampleR - djLowR); djLowR = lowR
-            val sL = ((lowL * gain).coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+
+            // 1-Pole Filter
+            val lowL = crossfadePrevLowL + alpha * (sampleL - crossfadePrevLowL); crossfadePrevLowL = lowL
+            val lowR = crossfadePrevLowR + alpha * (sampleR - crossfadePrevLowR); crossfadePrevLowR = lowR
+
+            var outL: Float
+            var outR: Float
+
+            if (crossfadeFilterType == 0) { // Lowpass
+                outL = lowL; outR = lowR
+            } else { // Highpass (Input - Lowpass)
+                outL = sampleL - lowL; outR = sampleR - lowR
+            }
+
+            // Apply Panning
+            outL *= leftPanGain
+            outR *= rightPanGain
+
+            val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
-            val sR = ((lowR * gain).coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
             i += 4
         }
@@ -305,8 +382,8 @@ class RawAudioPlayer {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val swing = sin(lfoPhase); val pan = swing * depth
-            val leftGain = (1.0f - (pan * 0.5f)) * gain
-            val rightGain = (1.0f + (pan * 0.5f)) * gain
+            val leftGain = (1.0f - maxOf(0f, pan)) * gain
+            val rightGain = (1.0f + minOf(0f, pan)) * gain
             val outL = sampleL * leftGain; val outR = sampleR * rightGain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
