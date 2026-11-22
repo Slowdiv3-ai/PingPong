@@ -38,9 +38,8 @@ class RawAudioPlayer {
     @Volatile var intervalSeconds: Float = 10f
     @Volatile var customModeIsLayered: Boolean = false
 
-    // Dynamic Crossfade Variables
-    @Volatile var crossfadeDirection: Int = 0 // 0 = L->R, 1 = R->L
-    @Volatile var crossfadeFilterType: Int = 0 // 0 = Low Pulse, 1 = High Pulse
+    @Volatile var crossfadeDirection: Int = 0
+    @Volatile var crossfadeFilterType: Int = 0
     @Volatile var crossfadeSpeed: Float = 1.0f
     @Volatile var crossfadeFilterIntensity: Float = 1.0f
 
@@ -84,10 +83,9 @@ class RawAudioPlayer {
     ) {
         Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
         
-        // Toggle direction and filter for dynamic crossfade
         crossfadeDirection = 1 - crossfadeDirection
         crossfadeFilterType = 1 - crossfadeFilterType
-        resetFilters() // Clear filter states for new track
+        resetFilters()
         
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
 
@@ -231,7 +229,6 @@ class RawAudioPlayer {
                         outputBuffer.get(bytes)
                         val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
-                        // Apply Dynamic Crossfade if fading in
                         if (!isOutgoing && currentGain < 1.0f && fadeInDurationSec > 0) {
                             applyDynamicCrossfade(bytes, bufferInfo.size, actualSampleRate, currentGain)
                         }
@@ -269,6 +266,7 @@ class RawAudioPlayer {
                             }
                             if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
                         } else {
+                            // FIX: Added PanMode.CUSTOM here to satisfy Kotlin's exhaustiveness checker
                             when (currentMode) {
                                 PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
                                 PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
@@ -276,6 +274,7 @@ class RawAudioPlayer {
                                 PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
+                                PanMode.CUSTOM -> applyFade(bytes, bufferInfo.size, currentGain) 
                             }
                         }
                         
@@ -303,31 +302,28 @@ class RawAudioPlayer {
         }
     }
 
-    // --- NEW DYNAMIC CROSSFADE FUNCTION ---
     private fun applyDynamicCrossfade(bytes: ByteArray, size: Int, sampleRate: Int, gain: Float) {
         var i = 0
-        // Panning: 0.0 = Start, 1.0 = End
         val pan = gain 
         val leftPanGain: Float
         val rightPanGain: Float
-        if (crossfadeDirection == 0) { // L -> R
+        if (crossfadeDirection == 0) {
             leftPanGain = 1.0f - pan
             rightPanGain = pan
-        } else { // R -> L
+        } else {
             leftPanGain = pan
             rightPanGain = 1.0f - pan
         }
 
-        // Filter Logic
         val intensity = crossfadeFilterIntensity
         val logMin = ln(200f)
         val logMax = ln(16000f)
-        val effectiveGain = gain * intensity + (1f - intensity) // Blends between no filter and full sweep
+        val effectiveGain = gain * intensity + (1f - intensity)
         
         val currentLogCutoff: Float
-        if (crossfadeFilterType == 0) { // Low Pulse (Lowpass)
+        if (crossfadeFilterType == 0) {
             currentLogCutoff = logMin + (logMax - logMin) * effectiveGain
-        } else { // High Pulse (Highpass)
+        } else {
             currentLogCutoff = logMax - (logMax - logMin) * effectiveGain
         }
 
@@ -338,20 +334,18 @@ class RawAudioPlayer {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
 
-            // 1-Pole Filter
             val lowL = crossfadePrevLowL + alpha * (sampleL - crossfadePrevLowL); crossfadePrevLowL = lowL
             val lowR = crossfadePrevLowR + alpha * (sampleR - crossfadePrevLowR); crossfadePrevLowR = lowR
 
             var outL: Float
             var outR: Float
 
-            if (crossfadeFilterType == 0) { // Lowpass
+            if (crossfadeFilterType == 0) {
                 outL = lowL; outR = lowR
-            } else { // Highpass (Input - Lowpass)
+            } else {
                 outL = sampleL - lowL; outR = sampleR - lowR
             }
 
-            // Apply Panning
             outL *= leftPanGain
             outR *= rightPanGain
 
