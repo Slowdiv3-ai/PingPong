@@ -190,11 +190,10 @@ class RawAudioPlayer {
                         lastSwitchTime = now
                         transitionProgress = 0.0f
                         
-                        // CRITICAL FIX: DO NOT call resetFilters() here! 
-                        // Snapping filter states and LFO phase to 0 mid-stream causes the "electric shock" pop.
-                        // Letting them run continuously ensures a perfectly smooth morph.
+                        // CRITICAL FIX: Do NOT reset filters or LFO phase here. 
+                        // Keeping them continuous prevents the "electric shock" click during transitions.
                         
-                        Log.d(TAG, "🔄 Morphing from $outgoingPreset to $currentPreset")
+                        Log.d(TAG, "🔄 Switched to preset: $currentPreset")
                     }
                     if (outgoingPreset != null) {
                         val elapsed = System.currentTimeMillis() - lastSwitchTime
@@ -263,14 +262,8 @@ class RawAudioPlayer {
                                     currentPreset = oldPreset
                                 }
                             } else {
-                                if (outgoingPreset != null && transitionProgress < 1.0f) {
-                                    val bytesB = bytes.copyOf()
-                                    applySinglePreset(outgoingPreset!!, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
-                                    applySinglePreset(currentPreset, bytesB, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
-                                    mixBytes(bytes, bytesB, transitionProgress)
-                                } else {
-                                    applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
-                                }
+                                // Apply the current preset directly. Continuous LFO/filter states ensure no clicks.
+                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
                             }
                             
                             if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
@@ -321,23 +314,6 @@ class RawAudioPlayer {
             PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, size, lfoStep, gain)
             PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, size, lfoStep, gain)
             PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, size, sampleRate, lfoStep, gain)
-        }
-    }
-
-    private fun mixBytes(bytesA: ByteArray, bytesB: ByteArray, progress: Float) {
-        var i = 0
-        val p = progress.coerceIn(0f, 1f)
-        val invP = 1f - p
-        while (i < bytesA.size - 3) {
-            val sL_A = (bytesA[i].toInt() and 0xFF or ((bytesA[i+1].toInt() and 0xFF) shl 8)).toShort()
-            val sR_A = (bytesA[i+2].toInt() and 0xFF or ((bytesA[i+3].toInt() and 0xFF) shl 8)).toShort()
-            val sL_B = (bytesB[i].toInt() and 0xFF or ((bytesB[i+1].toInt() and 0xFF) shl 8)).toShort()
-            val sR_B = (bytesB[i+2].toInt() and 0xFF or ((bytesB[i+3].toInt() and 0xFF) shl 8)).toShort()
-            val outL = (sL_A * invP + sL_B * p).toInt().toShort()
-            val outR = (sR_A * invP + sR_B * p).toInt().toShort()
-            bytesA[i] = (outL.toInt() and 0xFF).toByte(); bytesA[i+1] = (outL.toInt() shr 8).toByte()
-            bytesA[i+2] = (outR.toInt() and 0xFF).toByte(); bytesA[i+3] = (outR.toInt() shr 8).toByte()
-            i += 4
         }
     }
 
