@@ -40,7 +40,6 @@ class RawAudioPlayer {
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
-    // DJ Fade Filter States
     private var djLowL = 0.0f
     private var djLowR = 0.0f
 
@@ -49,7 +48,8 @@ class RawAudioPlayer {
     @Volatile private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
     
-    private var audioTrack: AudioTrack? = null
+    // This is the ONLY shared reference, used for refreshAudioTrack()
+    @Volatile private var currentAudioTrack: AudioTrack? = null
 
     private var fadeInGain = 0.0f
     private var fadeInTarget = 1.0f
@@ -70,7 +70,8 @@ class RawAudioPlayer {
         val oldThread = playbackThread
         if (oldThread != null) {
             oldThread.interrupt()
-            try { oldThread.join(500) } catch (_: Exception) {}
+            // Give the old thread enough time to finish any blocked write() calls
+            try { oldThread.join(1500) } catch (_: Exception) {}
         }
 
         isPlaying = true
@@ -80,57 +81,60 @@ class RawAudioPlayer {
         fadeInTarget = 1.0f
         fadeIncrement = if (crossfadeSeconds > 0) 1.0f / (crossfadeSeconds * 40) else 1.0f
         
-        // Reset all filter states
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
         lofiCounter = 0
-        djLowL = 0.0f; djLowR = 0.0f // Reset DJ filter
+        djLowL = 0.0f; djLowR = 0.0f
 
         playbackThread = Thread {
-            var extractor: MediaExtractor? = null
-            var codec: MediaCodec? = null
+            // CRITICAL FIX: Each thread gets its OWN local resources.
+            var localExtractor: MediaExtractor? = null
+            var localCodec: MediaCodec? = null
+            var localAudioTrack: AudioTrack? = null
             
             try {
-                extractor = MediaExtractor()
+                localExtractor = MediaExtractor()
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
                         val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                        extractor.setDataSource(fd.fileDescriptor)
+                        localExtractor.setDataSource(fd.fileDescriptor)
                     } else throw Exception("File not found")
                 } else {
-                    extractor.setDataSource(context, uri, null)
+                    localExtractor.setDataSource(context, uri, null)
                 }
 
                 var audioTrackIndex = -1
                 var format: MediaFormat? = null
-                for (i in 0 until extractor.trackCount) {
-                    val f = extractor.getTrackFormat(i)
+                for (i in 0 until localExtractor.trackCount) {
+                    val f = localExtractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
                     if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
                 }
                 if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
-                extractor.selectTrack(audioTrackIndex)
+                localExtractor.selectTrack(audioTrackIndex)
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
 
                 if (startTimeMs > 0) {
-                    extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    localExtractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 }
 
-                codec = MediaCodec.createDecoderByType(mime)
-                codec.configure(format, null, null, 0)
-                codec.start()
+                localCodec = MediaCodec.createDecoderByType(mime)
+                localCodec.configure(format, null, null, 0)
+                localCodec.start()
 
                 val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-                audioTrack = AudioTrack.Builder()
+                localAudioTrack = AudioTrack.Builder()
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                     .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
                 
-                audioTrack?.play()
+                // Update the shared reference so refreshAudioTrack() can find it
+                currentAudioTrack = localAudioTrack
+                localAudioTrack.play()
 
                 val bufferInfo = MediaCodec.BufferInfo()
                 var sawInputEOS = false
@@ -139,37 +143,35 @@ class RawAudioPlayer {
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
                     
-                    // Update fade gain
                     if (fadeInGain < fadeInTarget) {
                         fadeInGain += fadeIncrement
                         if (fadeInGain > fadeInTarget) fadeInGain = fadeInTarget
                     }
 
                     if (!sawInputEOS) {
-                        val inputBufferIndex = codec.dequeueInputBuffer(10000)
+                        val inputBufferIndex = localCodec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
-                            val inputBuffer = codec.getInputBuffer(inputBufferIndex)
+                            val inputBuffer = localCodec.getInputBuffer(inputBufferIndex)
                             inputBuffer?.clear()
-                            val sampleSize = extractor.readSampleData(inputBuffer!!, 0)
+                            val sampleSize = localExtractor.readSampleData(inputBuffer!!, 0)
                             if (sampleSize < 0) {
-                                codec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                localCodec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 sawInputEOS = true
                             } else {
-                                codec.queueInputBuffer(inputBufferIndex, 0, sampleSize, extractor.sampleTime, 0)
-                                extractor.advance()
+                                localCodec.queueInputBuffer(inputBufferIndex, 0, sampleSize, localExtractor.sampleTime, 0)
+                                localExtractor.advance()
                             }
                         }
                     }
 
-                    val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                    val outputBufferIndex = localCodec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
-                        val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
+                        val outputBuffer = localCodec.getOutputBuffer(outputBufferIndex)
                         if (bufferInfo.size > 0 && outputBuffer != null) {
                             val bytes = ByteArray(bufferInfo.size)
                             outputBuffer.get(bytes)
                             val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
-                            // 🎧 DJ CROSSFADE: Apply lowpass sweep while fading in
                             if (fadeInGain < 1.0f) {
                                 applyDjLowpass(bytes, bufferInfo.size, actualSampleRate)
                             }
@@ -182,9 +184,11 @@ class RawAudioPlayer {
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
-                            audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                            
+                            // Write to the LOCAL track, not the shared one
+                            localAudioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                         }
-                        codec.releaseOutputBuffer(outputBufferIndex, false)
+                        localCodec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
                     } else if (isPaused) { 
                         Thread.sleep(20) 
@@ -194,15 +198,16 @@ class RawAudioPlayer {
             } catch (e: Exception) {
                 if (isPlaying) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             } finally {
-                try { codec?.stop(); codec?.release() } catch (_: Exception) {}
-                try { extractor?.release() } catch (_: Exception) {}
-                try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
+                // CRITICAL FIX: Release the LOCAL resources. 
+                // This ensures the old thread doesn't kill the new thread's AudioTrack!
+                try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
+                try { localExtractor?.release() } catch (_: Exception) {}
+                try { localAudioTrack?.stop(); localAudioTrack?.release() } catch (_: Exception) {}
             }
         }
         playbackThread?.start()
     }
 
-    // 🎧 DJ LOWPASS SWEEP: Muffled (150Hz) to Clear (16000Hz) based on fadeInGain
     private fun applyDjLowpass(bytes: ByteArray, size: Int, sampleRate: Int) {
         var i = 0
         val logMin = ln(150f)
@@ -218,7 +223,6 @@ class RawAudioPlayer {
             val lowL = djLowL + alpha * (sampleL - djLowL); djLowL = lowL
             val lowR = djLowR + alpha * (sampleR - djLowR); djLowR = lowR
             
-            // We only apply the filter here. The volume fade is applied by the effect functions below.
             val sL = (lowL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (lowR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
@@ -362,12 +366,22 @@ class RawAudioPlayer {
 
     fun pause() { 
         isPaused = true
-        audioTrack?.pause() 
+        currentAudioTrack?.pause() 
     }
     
     fun resume() { 
         isPaused = false
-        audioTrack?.play() 
+        currentAudioTrack?.play() 
+    }
+
+    fun refreshAudioTrack() {
+        val track = currentAudioTrack
+        if (track != null && track.playState == AudioTrack.PLAYSTATE_STOPPED) {
+            try { track.stop(); track.release() } catch (_: Exception) {}
+            // Note: refreshAudioTrack is risky during playback, but we do our best here
+        } else if (track != null) {
+            track.play()
+        }
     }
 
     @Synchronized
@@ -376,11 +390,9 @@ class RawAudioPlayer {
         val thread = playbackThread
         if (thread != null) {
             thread.interrupt()
-            try { thread.join(1000) } catch (_: InterruptedException) {}
+            try { thread.join(1500) } catch (_: InterruptedException) {}
         }
         playbackThread = null
-        try { audioTrack?.stop() } catch (_: Exception) {}
-        try { audioTrack?.release() } catch (_: Exception) {}
-        audioTrack = null
+        currentAudioTrack = null
     }
 }
