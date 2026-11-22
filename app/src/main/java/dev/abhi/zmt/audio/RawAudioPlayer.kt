@@ -120,6 +120,12 @@ class RawAudioPlayer {
         var localCodec: MediaCodec? = null
         var localAudioTrack: AudioTrack? = null
 
+        // =====================================================================
+        // BULLETPROOF FIX: Declared at the function level. 
+        // This guarantees it is 100% in scope for the try, catch, and finally blocks.
+        // =====================================================================
+        val isOutgoing = Thread.currentThread() == outgoingThread
+
         try {
             localExtractor = MediaExtractor()
             if (uri.scheme == "file") {
@@ -159,7 +165,7 @@ class RawAudioPlayer {
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
             
-            if (Thread.currentThread() != outgoingThread) currentAudioTrack = localAudioTrack
+            if (!isOutgoing) currentAudioTrack = localAudioTrack
             localAudioTrack.play()
 
             val bufferInfo = MediaCodec.BufferInfo()
@@ -172,9 +178,6 @@ class RawAudioPlayer {
             var outgoingPreset: PanPreset? = null
             var transitionProgress = 1.0f
             val transitionDurationMs = 1200L
-
-            // Explicitly declare isOutgoing here so it is in scope for the entire while loop
-            val isOutgoing = Thread.currentThread() == outgoingThread
 
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
@@ -300,7 +303,8 @@ class RawAudioPlayer {
             try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
             try { localExtractor?.release() } catch (_: Exception) {}
             try { 
-                if (Thread.currentThread() != outgoingThread && currentAudioTrack === localAudioTrack) currentAudioTrack = null
+                // Now we can safely use !isOutgoing here without any scope issues
+                if (!isOutgoing && currentAudioTrack === localAudioTrack) currentAudioTrack = null
                 localAudioTrack?.stop(); localAudioTrack?.release() 
             } catch (_: Exception) {}
         }
