@@ -1071,7 +1071,8 @@ class PlayerViewModel @Inject constructor(
     
     private fun getCrossfadeSeconds(): Int {
         return try {
-            state.settings.crossfadeDuration.label.removeSuffix("s").toIntOrNull() ?: 0
+            // FIXED: Use 'currentState' instead of 'state'
+            currentState.settings.crossfadeDuration.label.removeSuffix("s").toIntOrNull() ?: 0
         } catch (e: Exception) {
             3 // Default to 3 seconds if parsing fails
         }
