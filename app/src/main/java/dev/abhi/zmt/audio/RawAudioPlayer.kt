@@ -40,23 +40,31 @@ class RawAudioPlayer {
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
-    private var isPlaying = false
-    private var isPaused = false
-    private var audioTrack: AudioTrack? = null
-    private var playbackThread: Thread? = null
+    @Volatile private var isPlaying = false
+    @Volatile private var playbackThread: Thread? = null
     private var lfoPhase = 0.0f
+    
+    // FADE IN VARIABLES (Fixes the 1-second leak on auto-next)
+    private var fadeInGain = 0.0f
+    private var fadeInTarget = 1.0f
+    private val FADE_IN_SPEED = 0.05f // Adjusts how fast it fades in (0.05 = ~0.5 seconds)
 
-    // CRITICAL FIX: Synchronize playUri to prevent race conditions when seeking
     @Synchronized
     fun playUri(context: Context, uri: Uri, startTimeMs: Long = 0, onError: (String) -> Unit, onSuccess: () -> Unit) {
-        Log.d(TAG, "playUri called: time=$startTimeMs")
+        Log.d(TAG, "▶ playUri CALLED: startTimeMs = $startTimeMs")
         
-        // Unconditionally stop any existing playback safely before starting a new one
-        stop()
-        
+        isPlaying = false
+        val oldThread = playbackThread
+        if (oldThread != null) {
+            oldThread.interrupt()
+            try { oldThread.join(500) } catch (_: Exception) {}
+        }
+
         isPlaying = true
-        isPaused = false
         lfoPhase = 0.0f
+        fadeInGain = 0.0f // Start fade in at 0 (Silent)
+        fadeInTarget = 1.0f
+        
         leftPrevLow = 0.0f; rightPrevLow = 0.0f
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
@@ -67,17 +75,13 @@ class RawAudioPlayer {
             var codec: MediaCodec? = null
             
             try {
-                Log.d(TAG, "Starting playback thread for time=$startTimeMs")
                 extractor = MediaExtractor()
-                
                 if (uri.scheme == "file") {
                     val file = java.io.File(uri.path)
                     if (file.exists()) {
                         val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                         extractor.setDataSource(fd.fileDescriptor)
-                    } else {
-                        throw Exception("File not found: ${uri.path}")
-                    }
+                    } else throw Exception("File not found")
                 } else {
                     extractor.setDataSource(context, uri, null)
                 }
@@ -87,22 +91,15 @@ class RawAudioPlayer {
                 for (i in 0 until extractor.trackCount) {
                     val f = extractor.getTrackFormat(i)
                     val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) { 
-                        audioTrackIndex = i
-                        format = f
-                        break 
-                    }
+                    if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
                 }
                 if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
 
                 extractor.selectTrack(audioTrackIndex)
                 val mime = format.getString(MediaFormat.KEY_MIME)!!
                 val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                // Seek AFTER selecting the track
                 if (startTimeMs > 0) {
-                    Log.d(TAG, "Seeking extractor to $startTimeMs ms")
                     extractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 }
 
@@ -111,11 +108,12 @@ class RawAudioPlayer {
                 codec.start()
 
                 val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-                audioTrack = AudioTrack.Builder()
+                val audioTrack = AudioTrack.Builder()
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                     .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-                audioTrack?.play()
+                
+                audioTrack.play()
 
                 val bufferInfo = MediaCodec.BufferInfo()
                 var sawInputEOS = false
@@ -124,6 +122,12 @@ class RawAudioPlayer {
                 while (isPlaying && !sawOutputEOS) {
                     if (Thread.currentThread().isInterrupted) break
                     
+                    // FADE IN LOGIC
+                    if (fadeInGain < fadeInTarget) {
+                        fadeInGain += FADE_IN_SPEED
+                        if (fadeInGain > fadeInTarget) fadeInGain = fadeInTarget
+                    }
+
                     if (!sawInputEOS) {
                         val inputBufferIndex = codec.dequeueInputBuffer(10000)
                         if (inputBufferIndex >= 0) {
@@ -143,23 +147,20 @@ class RawAudioPlayer {
                     val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
-                        if (bufferInfo.size > 0 && channelCount == 2 && outputBuffer != null) {
+                        if (bufferInfo.size > 0 && outputBuffer != null) {
                             val bytes = ByteArray(bufferInfo.size)
                             outputBuffer.get(bytes)
                             val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
                             when (currentMode) {
-                                PanMode.OFF -> {}
+                                PanMode.OFF -> applyFade(bytes, bufferInfo.size) // Just apply fade
                                 PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep)
                                 PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                                 PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep)
                                 PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep)
                                 PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep)
                             }
-
-                            if (!isPaused) {
-                                audioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
-                            }
+                            audioTrack.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
                         }
                         codec.releaseOutputBuffer(outputBufferIndex, false)
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
@@ -173,35 +174,25 @@ class RawAudioPlayer {
             } finally {
                 try { codec?.stop(); codec?.release() } catch (_: Exception) {}
                 try { extractor?.release() } catch (_: Exception) {}
+                try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
             }
         }
         playbackThread?.start()
     }
 
-    @Synchronized
-    fun stop() {
-        Log.d(TAG, "stop() called")
-        if (Thread.currentThread() == playbackThread) {
-            isPlaying = false
-            return
+    // Helper to just apply fade when mode is OFF
+    private fun applyFade(bytes: ByteArray, size: Int) {
+        var i = 0
+        while (i < size - 3) {
+            val sL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort()
+            val sR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort()
+            val outL = (sL * fadeInGain).toInt().toShort()
+            val outR = (sR * fadeInGain).toInt().toShort()
+            bytes[i] = (outL.toInt() and 0xFF).toByte(); bytes[i+1] = (outL.toInt() shr 8).toByte()
+            bytes[i+2] = (outR.toInt() and 0xFF).toByte(); bytes[i+3] = (outR.toInt() shr 8).toByte()
+            i += 4
         }
-        if (!isPlaying && playbackThread == null && audioTrack == null) return
-        
-        isPlaying = false
-        val thread = playbackThread
-        if (thread != null) {
-            thread.interrupt()
-            try { thread.join(2000) } catch (_: InterruptedException) {}
-        }
-        playbackThread = null
-        
-        try { audioTrack?.stop() } catch (_: Exception) {}
-        try { audioTrack?.release() } catch (_: Exception) {}
-        audioTrack = null
     }
-
-    fun pause() { isPaused = true; audioTrack?.pause() }
-    fun resume() { isPaused = false; audioTrack?.play() }
 
     // --- DSP EFFECTS ---
     private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float) {
@@ -209,10 +200,16 @@ class RawAudioPlayer {
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
-            var swing = (sin(lfoPhase) + 1.0f) / 2.0f
-            if (currentPreset == PanPreset.VOL_GENTLE) swing = (swing - 0.5f) * 0.4f + 0.5f
-            if (currentPreset == PanPreset.VOL_CHOP) swing = if (swing > 0.5f) 1f else 0f
-            val outL = sampleL * (1.0f - (swing * depth)); val outR = sampleR * (swing * depth)
+            
+            // FIX: Swing from -1 to 1 so 0 intensity = Center
+            val swing = sin(lfoPhase) 
+            val pan = swing * depth // -depth to +depth
+            
+            // Constant Power Pan Law
+            val leftGain = (1.0f - (pan * 0.5f)) * fadeInGain
+            val rightGain = (1.0f + (pan * 0.5f)) * fadeInGain
+            
+            val outL = sampleL * leftGain; val outR = sampleR * rightGain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
@@ -235,15 +232,22 @@ class RawAudioPlayer {
                 val alpha = 1.0f - exp(-2.0f * PI.toFloat() * exp(currentLogCutoff) / sampleRate)
                 val lowL = leftPrevLow + alpha * (sampleL - leftPrevLow); leftPrevLow = lowL
                 val lowR = rightPrevLow + alpha * (sampleR - rightPrevLow); rightPrevLow = lowR
-                outL = lowL; outR = lowR
+                outL = lowL * fadeInGain; outR = lowR * fadeInGain
             } else {
+                // FIX: Helicopter mode now forces a full swap regardless of depth slider
                 val baseFreq = when (currentPreset) { PanPreset.FREQ_DEEP_BASS -> 200f; PanPreset.FREQ_HI_HATS -> 6000f; else -> 1000f }
                 val alpha = 1.0f - exp(-2.0f * PI.toFloat() * baseFreq / sampleRate)
                 val lowL = leftPrevLow + alpha * (sampleL - leftPrevLow); leftPrevLow = lowL
                 val lowR = rightPrevLow + alpha * (sampleR - rightPrevLow); rightPrevLow = lowR
                 val highL = sampleL - lowL; val highR = sampleR - lowR
-                val swapL = lowL * (1f - swing) + highL * swing; val swapR = highR * (1f - swing) + lowR * swing
-                outL = sampleL + depth * (swapL - sampleL); outR = sampleR + depth * (swapR - sampleR)
+                
+                // Full swap
+                val swapL = lowL * (1f - swing) + highL * swing
+                val swapR = highR * (1f - swing) + lowR * swing
+                
+                // Use depth to blend between original and swapped
+                outL = (sampleL + (swapL - sampleL) * depth) * fadeInGain
+                outR = (sampleR + (swapR - sampleR) * depth) * fadeInGain
             }
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
@@ -260,7 +264,7 @@ class RawAudioPlayer {
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
             var lfoVal = (sin(lfoPhase) + 1.0f) / 2.0f
             if (currentPreset == PanPreset.TREMOLO_SQUARE) lfoVal = if (lfoVal > 0.5f) 1f else 0f
-            val gain = 0.3f + (0.7f * lfoVal * depth)
+            val gain = (0.3f + (0.7f * lfoVal * depth)) * fadeInGain
             val outL = sampleL * gain; val outR = sampleR * gain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
@@ -287,9 +291,10 @@ class RawAudioPlayer {
             val alpha = 0.2f
             val smoothL = leftPrevLow + alpha * (lofiHoldL - leftPrevLow); leftPrevLow = smoothL
             val smoothR = rightPrevLow + alpha * (lofiHoldR - rightPrevLow); rightPrevLow = smoothR
-            val sL = (smoothL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val outL = smoothL * fadeInGain; val outR = smoothR * fadeInGain
+            val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
-            val sR = (smoothR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
             i += 4; lfoPhase += lfoStep; if (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
         }
@@ -310,7 +315,8 @@ class RawAudioPlayer {
             val lpR = rightPrevLow + alphaLow * (sampleR - rightPrevLow); rightPrevLow = lpR
             val hpL = alphaHigh * (leftPrevHigh + lpL - leftPrevInput); leftPrevHigh = hpL; leftPrevInput = lpL
             val hpR = alphaHigh * (rightPrevHigh + lpR - rightPrevInput); rightPrevHigh = hpR; rightPrevInput = lpR
-            val outL = sampleL + depth * (hpL - sampleL); val outR = sampleR + depth * (hpR - sampleR)
+            val outL = (sampleL + depth * (hpL - sampleL)) * fadeInGain
+            val outR = (sampleR + depth * (hpR - sampleR)) * fadeInGain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
