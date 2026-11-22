@@ -213,18 +213,6 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
             }
         }
 
-        // --- DYNAMIC CROSSFADE SETTINGS ---
-        Caption("dynamic crossfade")
-        val cfSpeed = rawPlayer?.crossfadeSpeed ?: 1.0f
-        val cfIntensity = rawPlayer?.crossfadeFilterIntensity ?: 1.0f
-        
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("pan/filter speed", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
-            AsciiSlider(value = cfSpeed, min = 0.1f, max = 3.0f, steps = 29, onValueChange = { rawPlayer?.crossfadeSpeed = it })
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("filter intensity", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
-            AsciiSlider(value = cfIntensity, min = 0.0f, max = 1.0f, steps = 10, onValueChange = { rawPlayer?.crossfadeFilterIntensity = it })
-        }
         // ==========================================
         Caption(stringResource(R.string.tools))
         SettingRow(label = stringResource(R.string.set_eq_preset), value = state.equalizerPresetName) {
