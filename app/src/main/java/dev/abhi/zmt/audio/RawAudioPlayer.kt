@@ -38,25 +38,20 @@ class RawAudioPlayer {
     @Volatile var intervalSeconds: Float = 10f
     @Volatile var customModeIsLayered: Boolean = false
 
+    @Volatile private var fadeOutStartMs = 0L
+    @Volatile private var fadeOutDurationMs = 0L
+    @Volatile private var presetFadeStartMs = 0L
+    private val presetFadeDurationMs = 800L // 0.8 seconds smooth fade for preset cycles
+
     private var leftPrevLow = 0.0f; private var rightPrevLow = 0.0f
     private var leftPrevHigh = 0.0f; private var rightPrevHigh = 0.0f
     private var leftPrevInput = 0.0f; private var rightPrevInput = 0.0f
     private var lofiHoldL = 0.0f; private var lofiHoldR = 0.0f
     private var lofiCounter = 0
 
-    private var djLowL = 0.0f; private var djLowR = 0.0f
-
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
     @Volatile private var outgoingThread: Thread? = null
-    
-    @Volatile private var fadeOutStartMs = 0L
-    @Volatile private var fadeOutDurationMs = 0L
-    
-    // Smooth fade-in when cycling presets
-    @Volatile private var presetFadeStartMs = 0L
-    private val presetFadeDurationMs = 800L // 0.8 seconds smooth fade
-
     private var lfoPhase = 0.0f
     @Volatile private var currentAudioTrack: AudioTrack? = null
 
@@ -65,7 +60,6 @@ class RawAudioPlayer {
         leftPrevHigh = 0.0f; rightPrevHigh = 0.0f
         leftPrevInput = 0.0f; rightPrevInput = 0.0f
         lofiCounter = 0
-        djLowL = 0.0f; djLowR = 0.0f
         lfoPhase = 0.0f
     }
 
@@ -81,18 +75,20 @@ class RawAudioPlayer {
         Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
         
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
+        val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
 
         if (isOverlap) {
             Log.d(TAG, "🎧 Starting Overlap Crossfade...")
             outgoingThread = playbackThread
             fadeOutStartMs = System.currentTimeMillis()
-            fadeOutDurationMs = (crossfadeSeconds * 1000).toLong()
+            fadeOutDurationMs = fadeDurationMs
+            
+            val fadeInStartMs = System.currentTimeMillis() + (fadeDurationMs / 2)
             
             playbackThread = Thread {
                 try {
-                    Thread.sleep((crossfadeSeconds * 500).toLong())
-                    decodeAndPlay(context, uri, startTimeMs, isOutgoing = false, 
-                                  fadeInDurationSec = crossfadeSeconds / 2, onError, onSuccess)
+                    Thread.sleep(fadeDurationMs / 2)
+                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs / 2, onError, onSuccess)
                 } catch (e: InterruptedException) { } catch (e: Exception) {
                     Handler(Looper.getMainLooper()).post { onError(e.toString()) }
                 }
@@ -109,9 +105,7 @@ class RawAudioPlayer {
             outgoingThread = null
 
             playbackThread = Thread {
-                decodeAndPlay(context, uri, startTimeMs, isOutgoing = false, 
-                              fadeInDurationSec = if (crossfadeSeconds > 0) crossfadeSeconds else 0, 
-                              onError, onSuccess)
+                decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
             }
             playbackThread?.start()
         }
@@ -119,7 +113,7 @@ class RawAudioPlayer {
 
     private fun decodeAndPlay(
         context: Context, uri: Uri, startTimeMs: Long, 
-        isOutgoing: Boolean, fadeInDurationSec: Int,
+        fadeInStartMs: Long, fadeInDurationMs: Long,
         onError: (String) -> Unit, onSuccess: () -> Unit
     ) {
         var localExtractor: MediaExtractor? = null
@@ -165,7 +159,7 @@ class RawAudioPlayer {
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
             
-            if (!isOutgoing) currentAudioTrack = localAudioTrack
+            if (Thread.currentThread() !== outgoingThread) currentAudioTrack = localAudioTrack
             localAudioTrack.play()
 
             val bufferInfo = MediaCodec.BufferInfo()
@@ -174,32 +168,40 @@ class RawAudioPlayer {
             
             var lastSwitchTime = System.currentTimeMillis()
             var currentCustomIndex = 0
+            presetFadeStartMs = System.currentTimeMillis() // Initialize for the first preset
+
+            // DYNAMICALLY check if this thread is the outgoing one
+            val isOutgoing = Thread.currentThread() === outgoingThread
 
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
 
-                if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
-                    if (!customModeIsLayered) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastSwitchTime > intervalSeconds * 1000) {
-                            currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
-                            currentPreset = customPresets[currentCustomIndex]
-                            lastSwitchTime = now
-                            presetFadeStartMs = now // Start smooth fade in for new preset
-                            resetFilters()
-                            Log.d(TAG, "🔄 Cycled to preset: $currentPreset")
-                        }
+                if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty() && !customModeIsLayered) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSwitchTime > intervalSeconds * 1000) {
+                        currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
+                        currentPreset = customPresets[currentCustomIndex]
+                        lastSwitchTime = now
+                        presetFadeStartMs = now // Start smooth fade in for new preset
+                        resetFilters()
+                        Log.d(TAG, "🔄 Cycled to preset: $currentPreset")
                     }
                 }
 
+                // 1. Calculate Track Crossfade Gain
                 var currentGain = 1.0f
                 if (isOutgoing) {
                     val elapsed = System.currentTimeMillis() - fadeOutStartMs
                     currentGain = 1.0f - (elapsed.toFloat() / fadeOutDurationMs)
-                    if (currentGain <= 0.0f) break
+                    if (currentGain <= 0.0f) break // Die cleanly when faded out
+                } else {
+                    if (fadeInDurationMs > 0) {
+                        val elapsed = System.currentTimeMillis() - fadeInStartMs
+                        currentGain = (elapsed.toFloat() / fadeInDurationMs).coerceIn(0f, 1f)
+                    }
                 }
 
-                // Preset fade in logic for cycle mode
+                // 2. Calculate Preset Cycle Fade Gain
                 var presetGain = 1.0f
                 if (!isOutgoing && currentMode == PanMode.CUSTOM && !customModeIsLayered) {
                     val elapsed = System.currentTimeMillis() - presetFadeStartMs
@@ -207,6 +209,9 @@ class RawAudioPlayer {
                         presetGain = (elapsed.toFloat() / presetFadeDurationMs).coerceIn(0f, 1f)
                     }
                 }
+
+                // 3. Combine gains to prevent clipping
+                val finalGain = currentGain * presetGain
 
                 if (!sawInputEOS) {
                     val inputBufferIndex = localCodec.dequeueInputBuffer(10000)
@@ -234,55 +239,43 @@ class RawAudioPlayer {
 
                         if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
                             if (customModeIsLayered) {
-                                // 1. Degrade (LoFi)
-                                if (customPresets.any { it.name.startsWith("LOFI_") }) {
-                                    applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f)
-                                }
-                                // 2. Filter (Telephone or Frequency)
-                                if (customPresets.any { it.name.startsWith("TEL_") }) {
-                                    applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
-                                } else if (customPresets.any { it.name.startsWith("FREQ_") }) {
+                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, finalGain)
+                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
+                                if (customPresets.any { it.name.startsWith("FREQ_") }) {
                                     val freqPreset = customPresets.first { it.name.startsWith("FREQ_") }
                                     val oldPreset = currentPreset; currentPreset = freqPreset
-                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
+                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
                                     currentPreset = oldPreset
                                 }
-                                // 3. Modulation (ONLY ONE to prevent chaotic LFO beating / hi-hat sounds)
                                 if (customPresets.any { it.name.startsWith("TREMOLO_") }) {
                                     val tremPreset = customPresets.first { it.name.startsWith("TREMOLO_") }
                                     val oldPreset = currentPreset; currentPreset = tremPreset
-                                    applyTremolo(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    applyTremolo(bytes, bufferInfo.size, lfoStep, finalGain)
                                     currentPreset = oldPreset
                                 } else if (customPresets.any { it.name.startsWith("VOL_") }) {
                                     val volPreset = customPresets.first { it.name.startsWith("VOL_") }
                                     val oldPreset = currentPreset; currentPreset = volPreset
-                                    applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    applyVolumePan(bytes, bufferInfo.size, lfoStep, finalGain)
                                     currentPreset = oldPreset
                                 }
                             } else {
-                                // Cycle mode with smooth presetGain fade in
                                 when (currentPreset) {
-                                    PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, bufferInfo.size, lfoStep, presetGain)
-                                    PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, presetGain)
-                                    PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, bufferInfo.size, lfoStep, presetGain)
-                                    PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, bufferInfo.size, lfoStep, presetGain)
-                                    PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, presetGain)
+                                    PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, bufferInfo.size, lfoStep, finalGain)
+                                    PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
+                                    PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, bufferInfo.size, lfoStep, finalGain)
+                                    PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, bufferInfo.size, lfoStep, finalGain)
+                                    PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
                                 }
-                            }
-                            
-                            // Apply track crossfade gain at the very end
-                            if (currentGain < 1.0f) {
-                                applyFade(bytes, bufferInfo.size, currentGain)
                             }
                         } else {
                             when (currentMode) {
-                                PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
-                                PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                                PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                                PanMode.CUSTOM -> applyFade(bytes, bufferInfo.size, currentGain)
+                                PanMode.OFF -> applyFade(bytes, bufferInfo.size, finalGain)
+                                PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, finalGain)
+                                PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
+                                PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, finalGain)
+                                PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, finalGain)
+                                PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, finalGain)
+                                PanMode.CUSTOM -> applyFade(bytes, bufferInfo.size, finalGain)
                             }
                         }
                         
@@ -304,7 +297,7 @@ class RawAudioPlayer {
             try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
             try { localExtractor?.release() } catch (_: Exception) {}
             try { 
-                if (!isOutgoing && currentAudioTrack === localAudioTrack) currentAudioTrack = null
+                if (Thread.currentThread() !== outgoingThread && currentAudioTrack === localAudioTrack) currentAudioTrack = null
                 localAudioTrack?.stop(); localAudioTrack?.release() 
             } catch (_: Exception) {}
         }
