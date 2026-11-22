@@ -159,6 +159,14 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
 
         if (currentMode == RawAudioPlayer.PanMode.CUSTOM) {
             Caption("custom cycle presets")
+            // ADD THIS NEW TOGGLE ROW HERE:
+            val isLayered = rawPlayer?.customModeIsLayered == true
+            SettingRow(
+                label = "custom behavior", 
+                value = if (isLayered) "layer" else "cycle"
+            ) {
+                rawPlayer?.customModeIsLayered = !isLayered
+            }
             Text("Tap to toggle effects on/off", style = MaterialTheme.typography.labelSmall, color = TuiDim, modifier = Modifier.padding(bottom = 8.dp))
             
             RawAudioPlayer.PanPreset.values().forEach { preset ->
@@ -204,8 +212,20 @@ fun SettingsPane(state: DmtState, dispatch: (DmtAction) -> Unit, rawPlayer: RawA
                 AsciiSlider(value = depth, min = 0.0f, max = 1.0f, steps = 10, onValueChange = { newDepth -> rawPlayer?.depth = newDepth })
             }
         }
-        // ==========================================
 
+        // --- DYNAMIC CROSSFADE SETTINGS ---
+        Caption("dynamic crossfade")
+        val cfSpeed = rawPlayer?.crossfadeSpeed ?: 1.0f
+        val cfIntensity = rawPlayer?.crossfadeFilterIntensity ?: 1.0f
+        
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text("pan/filter speed", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
+            AsciiSlider(value = cfSpeed, min = 0.1f, max = 3.0f, steps = 29, onValueChange = { rawPlayer?.crossfadeSpeed = it })
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("filter intensity", style = MaterialTheme.typography.bodyMedium, color = TuiFg)
+            AsciiSlider(value = cfIntensity, min = 0.0f, max = 1.0f, steps = 10, onValueChange = { rawPlayer?.crossfadeFilterIntensity = it })
+        }
+        // ==========================================
         Caption(stringResource(R.string.tools))
         SettingRow(label = stringResource(R.string.set_eq_preset), value = state.equalizerPresetName) {
             val nextIndex = (state.equalizerPresetName.let { current -> EQ_PRESETS.indexOfFirst { it.first == current } } + 1).mod(EQ_PRESETS.size)
