@@ -1091,18 +1091,23 @@ class PlayerViewModel @Inject constructor(
             val uri = mediaItem?.localConfiguration?.uri
             currentTrackUri = uri
 
-            if (id != null && uri != null && controller?.isPlaying == true) {
+            if (id != null && uri != null) {
                 val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
                     ?: currentState.tracks.find { it.id.toString() == id }
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    val fadeSeconds = getCrossfadeSeconds()
-                    // THIS IS THE ONLY PLACE WE USE THE ACTUAL CROSSFADE SECONDS!
-                    rawPlayer.playUri(context, uri, 0L, fadeSeconds,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
-                        onSuccess = { }
-                    )
+                    
+                    // Start if playing OR if it's an auto-transition to the next song
+                    if (controller?.isPlaying == true || reason == androidx.media3.common.Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        val fadeSeconds = getCrossfadeSeconds()
+                        rawPlayer.playUri(context, uri, 0L, fadeSeconds,
+                            onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
+                            onSuccess = { }
+                        )
+                    } else {
+                        rawPlayer.stop()
+                    }
                 }
             } else {
                 rawPlayer.stop()
@@ -1118,9 +1123,8 @@ class PlayerViewModel @Inject constructor(
             if (isPlaying) {
                 controller?.volume = 0f
                 // CRITICAL: Force ExoPlayer to play so the UI doesn't show "paused"
-                if (controller?.isPlaying == false) {
-                    controller?.play()
-                }
+                if (controller?.isPlaying == false) controller?.play()
+                
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
@@ -1135,17 +1139,14 @@ class PlayerViewModel @Inject constructor(
         }
         
                 override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+            if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
                 controller?.volume = 0f
             }
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+            if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_SEEK) {
                 controller?.volume = 0f
-                
                 // CRITICAL: Force ExoPlayer to play so the UI doesn't show "paused" during seek
-                if (controller?.isPlaying == false) {
-                    controller?.play()
-                }
-
+                if (controller?.isPlaying == false) controller?.play()
+                
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
