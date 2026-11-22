@@ -1080,7 +1080,7 @@ class PlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            controller?.volume = 0f
+            controller?.volume = 0f // Mute ExoPlayer instantly
             
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
@@ -1097,15 +1097,15 @@ class PlayerViewModel @Inject constructor(
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    
                     val fadeSeconds = getCrossfadeSeconds()
+                    // THIS IS THE ONLY PLACE WE USE THE ACTUAL CROSSFADE SECONDS!
                     rawPlayer.playUri(context, uri, 0L, fadeSeconds,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
                         onSuccess = { }
                     )
                 }
             } else {
-                rawPlayer.stop() // <-- FIXED: Explicitly call on rawPlayer
+                rawPlayer.stop()
             }
         }
         
@@ -1116,30 +1116,30 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                controller?.volume = 0f
+                controller?.volume = 0f // Ensure ExoPlayer stays muted
                 val uri = currentTrackUri
                 if (uri != null) {
-                    val fadeSeconds = getCrossfadeSeconds()
-                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, fadeSeconds,
+                    // PASS 0 for crossfade on resume to prevent double-thread distortion!
+                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
                         onSuccess = { }
                     )
                 }
             } else {
-                rawPlayer.pause() // <-- FIXED: Explicitly call on rawPlayer
+                rawPlayer.pause()
+                controller?.pause() // CRITICAL: Ensure ExoPlayer is also paused so it doesn't run in the background
             }
         }
         
                 override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // CRITICAL FIX: Mute ExoPlayer INSTANTLY on auto-play to prevent the 1-second leak
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
                 controller?.volume = 0f
             }
-
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 controller?.volume = 0f
                 val uri = currentTrackUri
                 if (uri != null) {
+                    // PASS 0 for crossfade on seek to prevent double-thread distortion!
                     rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
