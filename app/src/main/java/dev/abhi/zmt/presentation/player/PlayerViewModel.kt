@@ -1069,19 +1069,22 @@ class PlayerViewModel @Inject constructor(
     private var lastPlayUriTime = 0L
     private var lastPlayUriString = ""
     
+    private fun getCrossfadeSeconds(): Int {
+        return try {
+            state.settings.crossfadeDuration.label.removeSuffix("s").toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            3 // Default to 3 seconds if parsing fails
+        }
+    }
+
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // 1. MUTE EXOPLAYER IMMEDIATELY. This must be the very first thing 
-            // to prevent the 1-second unprocessed audio leak.
             controller?.volume = 0f
             
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
-            loadCover(mediaItem)
-            loadTech(mediaItem)
-            loadLyrics(mediaItem)
-            loadLiked(mediaItem)
+            loadCover(mediaItem); loadTech(mediaItem); loadLyrics(mediaItem); loadLiked(mediaItem)
 
             val id = mediaItem?.mediaId
             val uri = mediaItem?.localConfiguration?.uri
@@ -1093,17 +1096,15 @@ class PlayerViewModel @Inject constructor(
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    rawPlayer.playUri(context, uri, 0L,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
-                            // Fallback: only unmute if DSP completely fails to start
-                            controller?.volume = 1f 
-                        },
+                    
+                    val fadeSeconds = getCrossfadeSeconds()
+                    rawPlayer.playUri(context, uri, 0L, fadeSeconds,
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg"); controller?.volume = 1f },
                         onSuccess = { }
                     )
                 }
             } else {
-                rawPlayer.stop()
+                rawPlayer.stop() // <-- FIXED: Explicitly call on rawPlayer
             }
         }
         
@@ -1114,49 +1115,32 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                // 2. Ensure ExoPlayer is muted the exact moment it resumes playing
                 controller?.volume = 0f
-                
                 val uri = currentTrackUri
                 if (uri != null) {
-                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L,
+                    val fadeSeconds = getCrossfadeSeconds()
+                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, fadeSeconds,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
                         onSuccess = { }
                     )
                 }
             } else {
-                rawPlayer.pause()
+                rawPlayer.pause() // <-- FIXED: Explicitly call on rawPlayer
             }
         }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                // 3. Ensure ExoPlayer stays muted during seeks
                 controller?.volume = 0f
-                
                 val uri = currentTrackUri
                 if (uri != null) {
-                    rawPlayer.playUri(context, uri, newPosition.positionMs,
+                    rawPlayer.playUri(context, uri, newPosition.positionMs, 1, // 1 second fast fade for seeks
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
                         onSuccess = { }
                     )
                 }
             }
         }
-        
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            controller?.let { c ->
-                val (queue, queuePosition) = c.queueWithPosition()
-                reduce {
-                    it.copy(
-                        shuffle = shuffleModeEnabled,
-                        queue = queue,
-                        queuePosition = queuePosition,
-                    )
-                }
-            }
-        }
-
         override fun onRepeatModeChanged(repeatMode: Int) {
             reduce { it.copy(repeat = repeatMode) }
         }
