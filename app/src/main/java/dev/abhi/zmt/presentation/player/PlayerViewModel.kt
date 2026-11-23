@@ -650,6 +650,7 @@ class PlayerViewModel @Inject constructor(
             is DmtAction.PlayAt -> c?.run {
                 reduce { it.copy(error = null) }
                 lastPlayUriString = ""
+                crossfadedForTrackId = null
                 rawPlayer.isExoPlaying = true
                 indexTracks(intent.list)
                 setMediaItems(
@@ -1043,7 +1044,32 @@ class PlayerViewModel @Inject constructor(
                 val position = c.currentPosition.coerceAtLeast(0L)
                 val duration = c.duration.takeIf { d -> d != C.TIME_UNSET }?.coerceAtLeast(0L) ?: currentState.durationMs
                 val index = c.currentMediaItemIndex
+
+                val fadeSec = getCrossfadeSeconds()
+                val fadeMs = fadeSec * 1000L
+                val currentId = c.currentMediaItem?.mediaId
+                if (c.isPlaying && fadeSec > 0 && duration > fadeMs && (duration - position) in 1..fadeMs) {
+                    if (currentId != null && crossfadedForTrackId != currentId && c.hasNextMediaItem()) {
+                        crossfadedForTrackId = currentId
+                        val nextItem = c.getMediaItemAt(c.nextMediaItemIndex)
+                        val nextUri = nextItem.localConfiguration?.uri
+                        if (nextUri != null) {
+                            lastPlayUriString = nextUri.toString()
+                            lastPlayUriTime = System.currentTimeMillis()
+                            rawPlayer.playUri(
+                                context,
+                                nextUri,
+                                0L,
+                                fadeSec,
+                                onError = { msg -> android.util.Log.e("RawAudioPlayer", "Crossfade error: " + msg) },
+                                onSuccess = { }
+                            )
+                        }
+                    }
+                }
+
                 val sleepLeft = sleepEndAt?.let { end ->
+
                     (end - System.currentTimeMillis()).coerceAtLeast(0L)
                 } ?: 0L
                 val sleepExpired = sleepEndAt != null && sleepLeft == 0L
@@ -1078,21 +1104,20 @@ class PlayerViewModel @Inject constructor(
     private var lastPlayedTrackId: String? = null
     private var currentTrackUri: Uri? = null
 
-    private var lastPlayUriTime = 0L
+        private var lastPlayUriTime = 0L
     private var lastPlayUriString = ""
+    private var crossfadedForTrackId: String? = null
     
-    private fun getCrossfadeSeconds(): Int {
-        return try {
-            // FIXED: Use 'currentState' instead of 'state'
-            currentState.settings.crossfadeDuration.label.removeSuffix("s").toIntOrNull() ?: 0
-        } catch (e: Exception) {
-            3 // Default to 3 seconds if parsing fails
-        }
-    }
+    private fun getCrossfadeSeconds(): Int =
+        currentState.settings.crossfadeDuration.seconds
+
 
     private val listener = object : Player.Listener {
-               override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
             controller?.volume = 0f 
+            crossfadedForTrackId = null
+
             
             val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
                                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
