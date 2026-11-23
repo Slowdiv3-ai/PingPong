@@ -185,9 +185,15 @@ class RawAudioPlayer {
             var outgoingPreset: PanPreset? = null
             var transitionProgress = 1.0f
             val transitionDurationMs = 1200L
-
+            
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
+                // Added pause check for !isExoPlaying to pause AudioTrack and sleep briefly
+                if (!isOutgoing && !isExoPlaying) {
+                    localAudioTrack?.playState.let { if (it == AudioTrack.PLAYSTATE_PLAYING) try { localAudioTrack?.pause() } catch (_: Exception) {} }
+                    try { Thread.sleep(25) } catch (_: InterruptedException) { break }
+                    continue
+                }
 
                 if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty() && !customModeIsLayered) {
                     val now = System.currentTimeMillis()
