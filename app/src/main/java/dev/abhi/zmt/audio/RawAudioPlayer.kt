@@ -48,6 +48,7 @@ class RawAudioPlayer {
     private var lofiSmoothL = 0.0f; private var lofiSmoothR = 0.0f
     private var lofiCounter = 0
 
+    @Volatile var isExoPlaying = true
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
     @Volatile private var outgoingThread: Thread? = null
@@ -97,12 +98,12 @@ class RawAudioPlayer {
         } else {
             Log.d(TAG, "⚡ Instant playback mode")
             isPlaying = false
-            val oldThread = playbackThread
-            if (oldThread != null) {
-                oldThread.interrupt()
-                try { oldThread.join(1500) } catch (_: Exception) {}
-            }
+            playbackThread?.interrupt()
+            outgoingThread?.interrupt()
             outgoingThread = null
+
+            try { currentAudioTrack?.pause() } catch (_: Exception) {}
+            currentAudioTrack = null
 
             playbackThread = Thread {
                 decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
@@ -164,10 +165,17 @@ class RawAudioPlayer {
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
             
-            if (!isOutgoing) currentAudioTrack = localAudioTrack
-            localAudioTrack.play()
+            if (!isOutgoing) {
+                currentAudioTrack = localAudioTrack
+                if (isExoPlaying) {
+                    localAudioTrack.play()
+                }
+            } else {
+                localAudioTrack.play()
+            }
 
             val bufferInfo = MediaCodec.BufferInfo()
+
             var sawInputEOS = false
             var sawOutputEOS = false
             
@@ -452,14 +460,17 @@ class RawAudioPlayer {
     }
 
     fun pause() { 
+        isExoPlaying = false
         val track = currentAudioTrack
         try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause() } catch (_: Exception) {}
     }
     
     fun resume() { 
+        isExoPlaying = true
         val track = currentAudioTrack
-        try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PAUSED) track.play() } catch (_: Exception) {}
+        try { if (track != null && track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play() } catch (_: Exception) {}
     }
+
     
     fun refreshAudioTrack() {
         val track = currentAudioTrack
