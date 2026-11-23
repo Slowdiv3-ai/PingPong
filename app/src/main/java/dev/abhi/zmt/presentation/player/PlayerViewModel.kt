@@ -1093,49 +1093,45 @@ class PlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // CRITICAL: Mute ExoPlayer immediately
-            controller?.volume = 0f 
+    controller?.volume = 0f
+    
+    reduce {
+        it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
+    }
+    loadCover(mediaItem)
+    loadTech(mediaItem)
+    loadLyrics(mediaItem)
+    loadLiked(mediaItem)
+
+    val id = mediaItem?.mediaId
+    val uri = mediaItem?.localConfiguration?.uri
+    currentTrackUri = uri
+
+    if (id != null && uri != null) {
+        val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+            ?: currentState.tracks.find { it.id.toString() == id }
+        
+        if (track != null) {
+            reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
             
-            reduce {
-                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
-            }
-            loadCover(mediaItem)
-            loadTech(mediaItem)
-            loadLyrics(mediaItem)
-            loadLiked(mediaItem)
-
-            val id = mediaItem?.mediaId
-            val uri = mediaItem?.localConfiguration?.uri
-            currentTrackUri = uri
-
-            if (id != null && uri != null) {
-                val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
-                    ?: currentState.tracks.find { it.id.toString() == id }
-                
-                if (track != null) {
-                    reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-                    
-                    val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                                           reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
-                    val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
-                    
-                    rawPlayer.playUri(context, uri, 0L, fadeSeconds,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
-                        },
-                        onSuccess = { }
-                    )
-                    
-                    // CRITICAL: If the app state says we should be playing, force ExoPlayer 
-                    // to play so its position advances and the UI doesn't get stuck at 00:00!
-                    if (currentState.isPlaying) {
-                        controller?.play()
-                    }
-                }
-            } else {
-                rawPlayer.stop()
+            val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+                                   reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
+            
+            rawPlayer.playUri(context, uri, 0L, fadeSeconds,
+                onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg") },
+                onSuccess = { }
+            )
+            
+            // CRITICAL: Force ExoPlayer to play so UI doesn't show paused
+            if (currentState.isPlaying) {
+                controller?.play()
             }
         }
+    } else {
+        rawPlayer.stop()
+    }
+}
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
         }
@@ -1431,30 +1427,28 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun restoreSession() {
-        if (sessionRestored) return
-        val c = controller ?: return
-        val tracks = currentState.tracks
-        if (tracks.isEmpty()) return
-        if (c.mediaItemCount > 0) {
-            sessionRestored = true
-            return
-        }
+    if (sessionRestored) return
+    val c = controller ?: return
+    val tracks = currentState.tracks
+    if (tracks.isEmpty()) return
+    if (c.mediaItemCount > 0) {
         sessionRestored = true
-        viewModelScope.launch {
-            val session = preferencesRepository.lastSession() ?: return@launch
-            val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
-            indexTracks(existing)
-            c.setMediaItems(
-                existing.map { it.toMediaItem() },
-                index,
-                position,
-            )
-            c.prepare()
-            
-            // CRITICAL: Prevent auto-play on app relaunch.
-            c.playWhenReady = false
-        }
+        return
     }
+    sessionRestored = true
+    viewModelScope.launch {
+        val session = preferencesRepository.lastSession() ?: return@launch
+        val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
+        indexTracks(existing)
+        c.setMediaItems(
+            existing.map { it.toMediaItem() },
+            index,
+            position,
+        )
+        c.prepare()
+        c.playWhenReady = false // CRITICAL: Prevent auto-play
+    }
+}
 
     private fun fetchOnlineLyrics() {
         val id = currentState.nowPlayingId ?: return
