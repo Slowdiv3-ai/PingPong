@@ -178,20 +178,21 @@ class PlaybackService : MediaLibraryService() {
             
         val mediaSourceFactory = DefaultMediaSourceFactory(offlineCacheDataSourceFactory)
 
-        val loadControl = DefaultLoadControl.Builder()
+                val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(50_000, 50_000, 750, 2_000)
             .build()
 
-     val player = ExoPlayer.Builder(this, renderersFactory)
+        val player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(C.USAGE_GAME)
+                    .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
                 handleAudioFocus,
             )
+
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setSeekBackIncrementMs(5000)
