@@ -659,7 +659,7 @@ class PlayerViewModel @Inject constructor(
                 )
                 prepare()
                 play()
-                        }
+            }
                         
 
 
