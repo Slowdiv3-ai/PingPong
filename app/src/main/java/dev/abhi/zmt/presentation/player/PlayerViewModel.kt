@@ -1501,10 +1501,28 @@ class PlayerViewModel @Inject constructor(
                 position,
             )
             c.prepare()
+            c.seekTo(index, position)
             c.pause()
-            delay(400L)
+            val track = existing.getOrNull(index)
+            if (track != null) {
+                lastPlayUriString = track.uri.toString()
+                lastPlayUriTime = System.currentTimeMillis()
+                rawPlayer.playUri(
+                    context,
+                    track.uri,
+                    position,
+                    0,
+                    onError = { msg -> android.util.Log.e("RawAudioPlayer", "Restore error: " + msg) },
+                    onSuccess = { }
+                )
+            }
+            delay(600L)
+            c.pause()
+            rawPlayer.isExoPlaying = false
+            rawPlayer.pause()
             isRestoringSession = false
         }
+
     }
     
 
