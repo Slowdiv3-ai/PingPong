@@ -84,18 +84,18 @@ class RawAudioPlayer {
             outgoingThread = playbackThread
             fadeOutStartMs = System.currentTimeMillis()
             fadeOutDurationMs = fadeDurationMs
-            val fadeInStartMs = System.currentTimeMillis() + (fadeDurationMs / 2)
+            val fadeInStartMs = System.currentTimeMillis()
             
             playbackThread = Thread {
                 try {
-                    Thread.sleep(fadeDurationMs / 2)
-                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs / 2, onError, onSuccess)
+                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs, onError, onSuccess)
                 } catch (e: InterruptedException) { } catch (e: Exception) {
                     Handler(Looper.getMainLooper()).post { onError(e.toString()) }
                 }
             }
             playbackThread?.start()
         } else {
+
             Log.d(TAG, "⚡ Instant playback mode")
             isPlaying = false
             playbackThread?.interrupt()
