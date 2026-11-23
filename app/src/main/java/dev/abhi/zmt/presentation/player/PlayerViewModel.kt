@@ -647,9 +647,9 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
             }
-
             is DmtAction.PlayAt -> c?.run {
                 reduce { it.copy(error = null) }
+                rawPlayer.isExoPlaying = true
                 indexTracks(intent.list)
                 setMediaItems(
                     intent.list.map { it.toMediaItem() },
@@ -669,12 +669,14 @@ class PlayerViewModel @Inject constructor(
 
             is DmtAction.Jump -> {
                 reduce { it.copy(showDownloadSheet = false) }
+                rawPlayer.isExoPlaying = true
                 c?.run {
                     seekTo(intent.index, 0L)
                     prepare()
                     play()
                 }
             }
+
 
             DmtAction.TogglePlay -> c?.togglePlayPause()
             DmtAction.Next -> {
@@ -1088,10 +1090,19 @@ class PlayerViewModel @Inject constructor(
     }
 
     private val listener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
             controller?.volume = 0f 
             
+            val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+                                   reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            if (shouldCrossfade) {
+                rawPlayer.isExoPlaying = true
+                controller?.play()
+            } else {
+                rawPlayer.isExoPlaying = controller?.playWhenReady == true
+            }
+
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
@@ -1113,13 +1124,11 @@ class PlayerViewModel @Inject constructor(
                     
                     // ONLY crossfade on AUTO transition (next song) or REPEAT. 
                     // Manual seeks get 0 seconds for instant, hiccup-free switching.
-                    val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                                           reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                     val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
                     
                     rawPlayer.playUri(context, uri, 0L, fadeSeconds,
                         onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
+                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
                             controller?.volume = 1f // Fallback
                         },
                         onSuccess = { 
@@ -1136,26 +1145,16 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            rawPlayer.isExoPlaying = isPlaying
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
                 controller?.volume = 0f
-                val uri = currentTrackUri
-                if (uri != null) {
-                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "Resume error: $msg")
-                            controller?.volume = 1f
-                        },
-                        onSuccess = { 
-                            controller?.volume = 0f
-                        }
-                    )
-                }
+                rawPlayer.resume()
             } else {
                 rawPlayer.pause()
-                controller?.pause()
             }
         }
+
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
@@ -1410,29 +1409,31 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    private fun restoreSession() {
-    if (sessionRestored) return
-    val c = controller ?: return
-    val tracks = currentState.tracks
-    if (tracks.isEmpty()) return
-    if (c.mediaItemCount > 0) {
+        private fun restoreSession() {
+        if (sessionRestored) return
+        val c = controller ?: return
+        val tracks = currentState.tracks
+        if (tracks.isEmpty()) return
+        if (c.mediaItemCount > 0) {
+            sessionRestored = true
+            return
+        }
         sessionRestored = true
-        return
+        viewModelScope.launch {
+            val session = preferencesRepository.lastSession() ?: return@launch
+            val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
+            indexTracks(existing)
+            c.playWhenReady = false
+            rawPlayer.isExoPlaying = false
+            c.setMediaItems(
+                existing.map { it.toMediaItem() },
+                index,
+                position,
+            )
+            c.prepare()
+        }
     }
-    sessionRestored = true
-    viewModelScope.launch {
-        val session = preferencesRepository.lastSession() ?: return@launch
-        val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
-        indexTracks(existing)
-        c.setMediaItems(
-            existing.map { it.toMediaItem() },
-            index,
-            position,
-        )
-        c.prepare()
-        c.playWhenReady = false // CRITICAL: Prevent auto-play
-    }
-}
+
 
     private fun fetchOnlineLyrics() {
         val id = currentState.nowPlayingId ?: return
