@@ -513,8 +513,10 @@ class PlaybackService : MediaLibraryService() {
             scope.future {
                 val session = preferencesRepository.lastSession() ?: throw UnsupportedOperationException()
                 val (existing, index, position) = session.resolveQueue(library()) ?: throw UnsupportedOperationException()
+                mediaSession.player.playWhenReady = isForPlayback
                 queueOf(existing, index, position)
             }
+
 
         private fun groupQueue(mediaId: String, prefix: String, tracks: List<Track>, startPositionMs: Long, tracksFor: (String) -> List<Track>?): MediaSession.MediaItemsWithStartPosition {
             val key = mediaId.removePrefix(prefix).substringBeforeLast('/')
@@ -545,34 +547,10 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun scheduleCrossfade(player: Player?) {
-        val p = player ?: return
-        if (crossfadeDurationMs <= 0L || p.mediaItemCount <= 1) return
-        cancelCrossfade()
-        crossfadeHandler = Handler(Looper.getMainLooper())
-        crossfadeRunnable = object : Runnable {
-            override fun run() {
-                if (!p.isPlaying || p.duration == C.TIME_UNSET || crossfadeDurationMs <= 0L) return
-                val remaining = p.duration - p.currentPosition
-                if (remaining <= crossfadeDurationMs && remaining > 0L && !isCrossfading) {
-                    isCrossfading = true
-                    val steps = 20
-                    val stepMs = crossfadeDurationMs / steps
-                    var step = 0
-                    val fadeOutRunnable = object : Runnable {
-                        override fun run() {
-                            if (step >= steps) return
-                            p.volume = (1f - (step.toFloat() / steps)).coerceIn(0f, 1f)
-                            step++
-                            crossfadeHandler?.postDelayed(this, stepMs)
-                        }
-                    }
-                    crossfadeHandler?.post(fadeOutRunnable)
-                }
-                if (remaining > 0L) crossfadeHandler?.postDelayed(this, 500)
-            }
-        }
-        crossfadeHandler?.postDelayed(crossfadeRunnable!!, 500)
+        // Crossfade is handled exclusively by RawAudioPlayer; keep ExoPlayer permanently muted.
+        player?.volume = 0f
     }
+
 
     private fun cancelCrossfade() {
         crossfadeRunnable?.let { crossfadeHandler?.removeCallbacks(it) }
