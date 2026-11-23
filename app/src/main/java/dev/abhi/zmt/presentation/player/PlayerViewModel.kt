@@ -649,6 +649,7 @@ class PlayerViewModel @Inject constructor(
             }
             is DmtAction.PlayAt -> c?.run {
                 reduce { it.copy(error = null) }
+                lastPlayUriString = ""
                 rawPlayer.isExoPlaying = true
                 indexTracks(intent.list)
                 setMediaItems(
@@ -1121,6 +1122,14 @@ class PlayerViewModel @Inject constructor(
                 
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
+
+                    val now = System.currentTimeMillis()
+                    val uriStr = uri.toString()
+                    if (uriStr == lastPlayUriString && now - lastPlayUriTime < 600L) {
+                        return
+                    }
+                    lastPlayUriString = uriStr
+                    lastPlayUriTime = now
                     
                     // ONLY crossfade on AUTO transition (next song) or REPEAT. 
                     // Manual seeks get 0 seconds for instant, hiccup-free switching.
@@ -1139,7 +1148,7 @@ class PlayerViewModel @Inject constructor(
             } else {
                 rawPlayer.stop()
             }
-        }
+
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
         }
@@ -1154,7 +1163,14 @@ class PlayerViewModel @Inject constructor(
                 rawPlayer.pause()
             }
         }
-
+        
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_BUFFERING) {
+                rawPlayer.pause()
+            } else if (playbackState == Player.STATE_READY && controller?.playWhenReady == true) {
+                rawPlayer.resume()
+            }
+        }
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
