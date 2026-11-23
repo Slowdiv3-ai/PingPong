@@ -291,7 +291,16 @@ class RawAudioPlayer {
                         lfoPhase += (bufferInfo.size / 4) * lfoStep
                         while (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
 
+                        if (!isOutgoing) {
+                            if (isExoPlaying && localAudioTrack?.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                                try { localAudioTrack?.play() } catch (_: Exception) {}
+                            } else if (!isExoPlaying && localAudioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                                try { localAudioTrack?.pause() } catch (_: Exception) {}
+                            }
+                        }
+
                         localAudioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+
                     }
                     localCodec.releaseOutputBuffer(outputBufferIndex, false)
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
