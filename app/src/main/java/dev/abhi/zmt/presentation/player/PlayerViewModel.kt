@@ -650,6 +650,7 @@ class PlayerViewModel @Inject constructor(
 
             is DmtAction.PlayAt -> c?.run {
                 reduce { it.copy(error = null) }
+                rawPlayer.isExoPlaying = true
                 indexTracks(intent.list)
                 setMediaItems(
                     intent.list.map { it.toMediaItem() },
@@ -658,7 +659,10 @@ class PlayerViewModel @Inject constructor(
                 )
                 prepare()
                 play()
-            }
+                        }
+                        
+
+
 
             is DmtAction.Enqueue -> c?.run {
                 indexTracks(intent.list)
@@ -666,16 +670,17 @@ class PlayerViewModel @Inject constructor(
                 prepare()
                 notify(context.getString(R.string.queued, intent.label))
             }
-
             is DmtAction.Jump -> {
                 reduce { it.copy(showDownloadSheet = false) }
+                rawPlayer.isExoPlaying = true
                 c?.run {
                     seekTo(intent.index, 0L)
                     prepare()
                     play()
                 }
             }
-
+            
+            
             DmtAction.TogglePlay -> c?.togglePlayPause()
             DmtAction.Next -> {
                 reduce { it.copy(showDownloadSheet = false) }
@@ -1425,15 +1430,17 @@ class PlayerViewModel @Inject constructor(
         val session = preferencesRepository.lastSession() ?: return@launch
         val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
         indexTracks(existing)
+        c.playWhenReady = false // Set BEFORE setMediaItems so transition knows we are paused
+        rawPlayer.isExoPlaying = false
         c.setMediaItems(
             existing.map { it.toMediaItem() },
             index,
             position,
         )
         c.prepare()
-        c.playWhenReady = false // CRITICAL: Prevent auto-play
     }
-}
+
+    
 
     private fun fetchOnlineLyrics() {
         val id = currentState.nowPlayingId ?: return
