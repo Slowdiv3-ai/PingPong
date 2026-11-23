@@ -64,52 +64,53 @@ class RawAudioPlayer {
         lfoPhase = 0.0f
     }
 
-    @Synchronized
-    fun playUri(
-        context: Context, 
-        uri: Uri, 
-        startTimeMs: Long = 0, 
-        crossfadeSeconds: Int = 0, 
-        onError: (String) -> Unit, 
-        onSuccess: () -> Unit
-    ) {
-        Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
+@Synchronized
+fun playUri(
+    context: Context, 
+    uri: Uri, 
+    startTimeMs: Long = 0, 
+    crossfadeSeconds: Int = 0, 
+    onError: (String) -> Unit, 
+    onSuccess: () -> Unit
+) {
+    val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
+    val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
+
+    if (isOverlap) {
+        outgoingThread = playbackThread
+        fadeOutStartMs = System.currentTimeMillis()
+        fadeOutDurationMs = fadeDurationMs
+        val fadeInStartMs = System.currentTimeMillis() + (fadeDurationMs / 2)
         
-        val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
-        val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
+        playbackThread = Thread {
+            try {
+                Thread.sleep(fadeDurationMs / 2)
+                decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs / 2, onError, onSuccess)
+            } catch (_: InterruptedException) { 
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+            }
+        }.apply { start() }
+    } else {
+        // 1. Interrupt old thread and immediately stop/flush its AudioTrack so WRITE_BLOCKING unblocks without .join()
+        playbackThread?.interrupt()
+        outgoingThread?.interrupt()
+        outgoingThread = null
+        
+        val oldTrack = currentAudioTrack
+        currentAudioTrack = null
+        try {
+            oldTrack?.pause()
+            oldTrack?.flush()
+            oldTrack?.release()
+        } catch (_: Exception) {}
 
-        if (isOverlap) {
-            Log.d(TAG, "🎧 Starting Overlap Crossfade...")
-            outgoingThread = playbackThread
-            fadeOutStartMs = System.currentTimeMillis()
-            fadeOutDurationMs = fadeDurationMs
-            val fadeInStartMs = System.currentTimeMillis() + (fadeDurationMs / 2)
-            
-            playbackThread = Thread {
-                try {
-                    Thread.sleep(fadeDurationMs / 2)
-                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs / 2, onError, onSuccess)
-                } catch (e: InterruptedException) { } catch (e: Exception) {
-                    Handler(Looper.getMainLooper()).post { onError(e.toString()) }
-                }
-            }
-            playbackThread?.start()
-        } else {
-            Log.d(TAG, "⚡ Instant playback mode")
-            isPlaying = false
-            val oldThread = playbackThread
-            if (oldThread != null) {
-                oldThread.interrupt()
-                try { oldThread.join(1500) } catch (_: Exception) {}
-            }
-            outgoingThread = null
-
-            playbackThread = Thread {
-                decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
-            }
-            playbackThread?.start()
-        }
+        playbackThread = Thread {
+            decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
+        }.apply { start() }
     }
+}
+
 
     private fun decodeAndPlay(
         context: Context, uri: Uri, startTimeMs: Long, 
