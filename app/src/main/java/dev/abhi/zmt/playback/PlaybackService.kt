@@ -182,13 +182,11 @@ class PlaybackService : MediaLibraryService() {
             .setBufferDurationsMs(50_000, 50_000, 750, 2_000)
             .build()
 
-        val player = ExoPlayer.Builder(this, renderersFactory)
+     val player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    // WORKAROUND: Use USAGE_GAME to bypass buggy OEM "SoundBooster" global effects
-                    // that crash on session 0 and cause AudioTrack timeouts.
                     .setUsage(C.USAGE_GAME)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
@@ -211,6 +209,10 @@ class PlaybackService : MediaLibraryService() {
                 },
             )
             .build()
+            
+        // CRITICAL: Permanently mute ExoPlayer. RawAudioPlayer handles ALL audio output.
+        // This completely eliminates the 1-second audio leak on track transitions.
+        player.volume = 0f
             
         val keepPlaybackHistory = false
         player.addAnalyticsListener(
@@ -257,7 +259,7 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentErrorRetries = 0
-                if (isCrossfading) player.volume = 1f
+                // REMOVED: if (isCrossfading) player.volume = 1f  <-- This was causing the leak!
                 isCrossfading = false
                 cancelCrossfade()
                 saveSession()
@@ -337,7 +339,7 @@ class PlaybackService : MediaLibraryService() {
         val player = mediaSession?.player ?: return
         val id = mediaItem?.mediaId?.toLongOrNull()
         if (!normalizeVolume || id == null) {
-            player.volume = 1f
+            player.volume = 0f // CHANGED: Keep muted instead of 1f
             return
         }
         scope.launch {
@@ -354,7 +356,8 @@ class PlaybackService : MediaLibraryService() {
                 gainDb?.let { 10.0.pow(it / 20.0).toFloat().coerceIn(0f, 1f) } ?: 1f
             }
             if (mediaSession?.player?.currentMediaItem?.mediaId == mediaItem.mediaId) {
-                mediaSession?.player?.volume = volume
+                // CRITICAL: Do NOT change ExoPlayer volume. Keep it at 0f.
+                // mediaSession?.player?.volume = volume 
             }
         }
     }
