@@ -1093,45 +1093,47 @@ class PlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-    controller?.volume = 0f
-    
-    reduce {
-        it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
-    }
-    loadCover(mediaItem)
-    loadTech(mediaItem)
-    loadLyrics(mediaItem)
-    loadLiked(mediaItem)
+            // 1. Mute ExoPlayer permanently
+            controller?.volume = 0f 
+            
+            reduce {
+                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
+            }
+            loadCover(mediaItem)
+            loadTech(mediaItem)
+            loadLyrics(mediaItem)
+            loadLiked(mediaItem)
 
-    val id = mediaItem?.mediaId
-    val uri = mediaItem?.localConfiguration?.uri
-    currentTrackUri = uri
+            val id = mediaItem?.mediaId
+            val uri = mediaItem?.localConfiguration?.uri
+            currentTrackUri = uri
 
-    if (id != null && uri != null) {
-        val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
-            ?: currentState.tracks.find { it.id.toString() == id }
-        
-        if (track != null) {
-            reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-            
-            val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                                   reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
-            val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
-            
-            rawPlayer.playUri(context, uri, 0L, fadeSeconds,
-                onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg") },
-                onSuccess = { }
-            )
-            
-            // CRITICAL: Force ExoPlayer to play so UI doesn't show paused
-            if (currentState.isPlaying) {
-                controller?.play()
+            if (id != null && uri != null) {
+                val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
+                    ?: currentState.tracks.find { it.id.toString() == id }
+                
+                if (track != null) {
+                    reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
+                    
+                    val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+                                           reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+                    val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
+                    
+                    rawPlayer.playUri(context, uri, 0L, fadeSeconds,
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg") },
+                        onSuccess = { }
+                    )
+                    
+                    // 2. CRITICAL: Force ExoPlayer to PLAY. 
+                    // This holds Audio Focus (preventing hiccups) and keeps the UI progress bar moving!
+                    // Since volume is 0f, it will be completely silent.
+                    controller?.play()
+                }
+            } else {
+                rawPlayer.stop()
+                controller?.pause()
             }
         }
-    } else {
-        rawPlayer.stop()
-    }
-}
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
         }
@@ -1139,52 +1141,36 @@ class PlayerViewModel @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
-                // CRITICAL: Keep ExoPlayer permanently muted
                 controller?.volume = 0f
                 
-                // Force ExoPlayer to play so the UI doesn't get stuck 
-                if (controller?.isPlaying == false) {
-                    controller?.play()
-                }
+                // CRITICAL: Ensure ExoPlayer is playing to hold audio focus and sync UI
+                controller?.play()
                 
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "Resume error: $msg")
-                            controller?.volume = 1f // Fallback unmute
-                        },
-                        onSuccess = { 
-                            controller?.volume = 0f // Ensure muted after success
-                        }
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
+                        onSuccess = { }
                     )
                 }
             } else {
                 rawPlayer.pause()
-                controller?.pause() // Ensure ExoPlayer is also paused
+                controller?.pause() // Pause ExoPlayer when user explicitly pauses
             }
         }
         
-                override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            // CRITICAL: Mute ExoPlayer on ALL discontinuities (auto-transition, seek, etc.)
-            controller?.volume = 0f
-            
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                // Force ExoPlayer to play during seek to keep the UI alive and synced
-                if (controller?.isPlaying == false) {
-                    controller?.play()
-                }
+                controller?.volume = 0f
+                
+                // CRITICAL: Keep ExoPlayer playing to hold audio focus and sync UI during seek
+                controller?.play()
                 
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "Seek error: $msg")
-                            controller?.volume = 1f // Fallback unmute
-                        },
-                        onSuccess = { 
-                            controller?.volume = 0f // Ensure muted after success
-                        }
+                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: $msg") },
+                        onSuccess = { }
                     )
                 }
             }
