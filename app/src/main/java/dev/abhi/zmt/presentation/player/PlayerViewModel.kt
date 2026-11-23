@@ -1053,7 +1053,7 @@ class PlayerViewModel @Inject constructor(
                         crossfadedForTrackId = currentId
                         val nextItem = c.getMediaItemAt(c.nextMediaItemIndex)
                         val nextUri = nextItem.localConfiguration?.uri
-                        if (nextUri != null) {
+                            if (nextUri != null) {
                             lastPlayUriString = nextUri.toString()
                             lastPlayUriTime = System.currentTimeMillis()
                             rawPlayer.playUri(
@@ -1064,7 +1064,9 @@ class PlayerViewModel @Inject constructor(
                                 onError = { msg -> android.util.Log.e("RawAudioPlayer", "Crossfade error: " + msg) },
                                 onSuccess = { }
                             )
+                            c.seekToNextMediaItem()
                         }
+
                     }
                 }
 
@@ -1125,8 +1127,9 @@ class PlayerViewModel @Inject constructor(
                 rawPlayer.isExoPlaying = true
                 controller?.play()
             } else {
-                rawPlayer.isExoPlaying = controller?.playWhenReady == true
+                rawPlayer.isExoPlaying = controller?.isPlaying == true
             }
+
 
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
@@ -1155,9 +1158,12 @@ class PlayerViewModel @Inject constructor(
                     lastPlayUriString = uriStr
                     lastPlayUriTime = now
                     
-                    val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
+    
                     
-                    rawPlayer.playUri(context, uri, 0L, fadeSeconds,
+                    val fadeSeconds = 0
+                    val startPos = if (shouldCrossfade) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
+                    
+                    rawPlayer.playUri(context, uri, startPos, fadeSeconds,
                         onError = { msg -> 
                             android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
                             controller?.volume = 1f
@@ -1166,6 +1172,7 @@ class PlayerViewModel @Inject constructor(
                             controller?.volume = 0f
                         }
                     )
+
                 }
             } else {
                 rawPlayer.stop()
