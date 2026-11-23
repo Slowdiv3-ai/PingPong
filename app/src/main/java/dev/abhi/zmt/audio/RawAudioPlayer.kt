@@ -182,42 +182,53 @@ class RawAudioPlayer {
             var lastSwitchTime = System.currentTimeMillis()
             var currentCustomIndex = 0
             
+            var outgoingMode: PanMode? = null
             var outgoingPreset: PanPreset? = null
+            var lastActiveMode = currentMode
+            var lastActivePreset = currentPreset
+            var transitionStartMs = 0L
             var transitionProgress = 1.0f
-            val transitionDurationMs = 3000L
+            val transitionDurationMs = 2500L
+
             
-            while (!sawOutputEOS) {
-                if (Thread.currentThread().isInterrupted) break
-                // Added pause check for !isExoPlaying to pause AudioTrack and sleep briefly
-                if (!isOutgoing && !isExoPlaying) {
-                    localAudioTrack?.playState.let { if (it == AudioTrack.PLAYSTATE_PLAYING) try { localAudioTrack?.pause() } catch (_: Exception) {} }
-                    try { Thread.sleep(25) } catch (_: InterruptedException) { break }
-                    continue
-                }
-
-                    if (now - lastSwitchTime > intervalSeconds * 1000) {
-                        outgoingPreset = currentPreset
-                        currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
-                        currentPreset = customPresets[currentCustomIndex]
-                        lastSwitchTime = now
-                        transitionProgress = 0.0f
-                        lofiCounter = 4
-                        
-                        Log.d(TAG, "🔄 Switched to preset: $currentPreset")
-                    }
-
-                    if (outgoingPreset != null) {
-                        val elapsed = System.currentTimeMillis() - lastSwitchTime
-                        val effectiveDuration = minOf(transitionDurationMs, (intervalSeconds * 600f).toLong().coerceAtLeast(1000L))
-                        val rawT = (elapsed.toFloat() / effectiveDuration).coerceIn(0f, 1f)
-                        transitionProgress = rawT * rawT * (3f - 2f * rawT)
-                        if (rawT >= 1.0f) {
-                            outgoingPreset = null
+                if (!isOutgoing) {
+                    val now = System.currentTimeMillis()
+                    if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty() && !customModeIsLayered) {
+                        if (now - lastSwitchTime > intervalSeconds * 1000) {
+                            currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
+                            currentPreset = customPresets[currentCustomIndex]
+                            lastSwitchTime = now
+                            Log.d(TAG, "🔄 Switched to preset: $currentPreset")
                         }
                     }
 
+                    // Detect ANY mode or preset change (manual tap OR custom timer)
+                    if (currentMode != lastActiveMode || currentPreset != lastActivePreset) {
+                        outgoingMode = lastActiveMode
+                        outgoingPreset = lastActivePreset
+                        lastActiveMode = currentMode
+                        lastActivePreset = currentPreset
+                        transitionStartMs = now
+                        transitionProgress = 0.0f
+                        lofiCounter = 4
+                    }
 
+                    if (outgoingMode != null && outgoingPreset != null) {
+                        val elapsed = now - transitionStartMs
+                        val effectiveDuration = if (currentMode == PanMode.CUSTOM && !customModeIsLayered) {
+                            minOf(transitionDurationMs, (intervalSeconds * 600f).toLong().coerceAtLeast(1000L))
+                        } else {
+                            transitionDurationMs
+                        }
+                        val rawT = (elapsed.toFloat() / effectiveDuration).coerceIn(0f, 1f)
+                        transitionProgress = rawT * rawT * (3f - 2f * rawT)
+                        if (rawT >= 1.0f) {
+                            outgoingMode = null
+                            outgoingPreset = null
+                        }
+                    }
                 }
+
 
                 var currentGain = 1.0f
                 if (isOutgoing) {
@@ -255,7 +266,15 @@ class RawAudioPlayer {
                         outputBuffer.get(bytes)
                         val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
-                        if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
+                        if (!isOutgoing && outgoingMode != null && outgoingPreset != null && transitionProgress < 1.0f) {
+                            val angle = transitionProgress * (PI.toFloat() / 2.0f)
+                            val outGain = cos(angle) * currentGain
+                            val inGain = sin(angle) * currentGain
+                            val outBytes = bytes.copyOf(bufferInfo.size)
+                            applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, outGain)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, inGain)
+                            mixPcmBuffers(bytes, outBytes, bufferInfo.size)
+                        } else if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
                             if (customModeIsLayered) {
                                 if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f)
                                 if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
@@ -276,35 +295,14 @@ class RawAudioPlayer {
                                     applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
                                     currentPreset = oldPreset
                                 }
-                            } else if (outgoingPreset != null && transitionProgress < 1.0f) {
-                                val angle = transitionProgress * (PI.toFloat() / 2.0f)
-                                val outGain = cos(angle)
-                                val inGain = sin(angle)
-                                val outBytes = bytes.copyOf(bufferInfo.size)
-                                applySinglePreset(outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, outGain)
-                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, inGain)
-                                mixPcmBuffers(bytes, outBytes, bufferInfo.size)
                             } else {
-
-                    
-                                // Apply the current preset directly. Continuous LFO/filter states ensure no clicks.
                                 applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
                             }
-
-                            
                             if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
                         } else {
-                            when (currentMode) {
-                                PanMode.OFF -> applyFade(bytes, bufferInfo.size, currentGain)
-                                PanMode.VOLUME -> applyVolumePan(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.FREQUENCY -> applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                                PanMode.TREMOLO -> applyTremolo(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.LOFI -> applyLoFi(bytes, bufferInfo.size, lfoStep, currentGain)
-                                PanMode.TELEPHONE -> applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
-                                PanMode.CUSTOM -> applyFade(bytes, bufferInfo.size, currentGain)
-                            }
+                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain)
                         }
-                        
+
                         // Advance LFO exactly ONCE per buffer
                         lfoPhase += (bufferInfo.size / 4) * lfoStep
                         while (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
@@ -342,6 +340,21 @@ class RawAudioPlayer {
         }
     }
 
+    private fun applyModeAndPreset(mode: PanMode, preset: PanPreset, bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float) {
+        val savedPreset = currentPreset
+        currentPreset = preset
+        when (mode) {
+            PanMode.OFF -> applyFade(bytes, size, gain)
+            PanMode.VOLUME -> applyVolumePan(bytes, size, lfoStep, gain)
+            PanMode.FREQUENCY -> applyFrequencyPan(bytes, size, sampleRate, lfoStep, gain)
+            PanMode.TREMOLO -> applyTremolo(bytes, size, lfoStep, gain)
+            PanMode.LOFI -> applyLoFi(bytes, size, lfoStep, gain)
+            PanMode.TELEPHONE -> applyTelephone(bytes, size, sampleRate, lfoStep, gain)
+            PanMode.CUSTOM -> applySinglePreset(preset, bytes, size, sampleRate, lfoStep, gain)
+        }
+        currentPreset = savedPreset
+    }
+
     private fun applySinglePreset(preset: PanPreset, bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float) {
         when (preset) {
             PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, size, lfoStep, gain)
@@ -351,6 +364,7 @@ class RawAudioPlayer {
             PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, size, sampleRate, lfoStep, gain)
         }
     }
+
 
     private fun mixPcmBuffers(target: ByteArray, addend: ByteArray, size: Int) {
         var i = 0
