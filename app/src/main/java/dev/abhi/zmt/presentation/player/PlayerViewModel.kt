@@ -679,15 +679,11 @@ class PlayerViewModel @Inject constructor(
             DmtAction.TogglePlay -> c?.togglePlayPause()
             DmtAction.Next -> {
                 reduce { it.copy(showDownloadSheet = false) }
-                c?.seekToNext()
-                // CRITICAL: Ensure ExoPlayer advances its position so the UI updates
-                if (currentState.isPlaying) c?.play()
+                c?.seekToNext() // ExoPlayer automatically keeps playing if it was already playing
             }
             DmtAction.Prev -> {
                 reduce { it.copy(showDownloadSheet = false) }
                 c?.seekToPrevious()
-                // CRITICAL: Ensure ExoPlayer advances its position so the UI updates
-                if (currentState.isPlaying) c?.play()
             }
             DmtAction.ToggleShuffle -> c?.run { shuffleModeEnabled = !shuffleModeEnabled }
             DmtAction.CycleRepeat -> c?.cycleRepeat()
@@ -1093,7 +1089,7 @@ class PlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // 1. Mute ExoPlayer permanently
+            // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
             controller?.volume = 0f 
             
             reduce {
@@ -1115,23 +1111,24 @@ class PlayerViewModel @Inject constructor(
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
                     
+                    // ONLY crossfade on AUTO transition (next song) or REPEAT. 
+                    // Manual seeks get 0 seconds for instant, hiccup-free switching.
                     val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
                                            reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                     val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
                     
                     rawPlayer.playUri(context, uri, 0L, fadeSeconds,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg") },
-                        onSuccess = { }
+                        onError = { msg -> 
+                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: $msg")
+                            controller?.volume = 1f // Fallback
+                        },
+                        onSuccess = { 
+                            controller?.volume = 0f // Ensure muted
+                        }
                     )
-                    
-                    // 2. CRITICAL: Force ExoPlayer to PLAY. 
-                    // This holds Audio Focus (preventing hiccups) and keeps the UI progress bar moving!
-                    // Since volume is 0f, it will be completely silent.
-                    controller?.play()
                 }
             } else {
                 rawPlayer.stop()
-                controller?.pause()
             }
         }
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -1142,20 +1139,21 @@ class PlayerViewModel @Inject constructor(
             reduce { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
                 controller?.volume = 0f
-                
-                // CRITICAL: Ensure ExoPlayer is playing to hold audio focus and sync UI
-                controller?.play()
-                
                 val uri = currentTrackUri
                 if (uri != null) {
                     rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
-                        onError = { msg -> android.util.Log.e("RawAudioPlayer", "Resume error: $msg") },
-                        onSuccess = { }
+                        onError = { msg -> 
+                            android.util.Log.e("RawAudioPlayer", "Resume error: $msg")
+                            controller?.volume = 1f
+                        },
+                        onSuccess = { 
+                            controller?.volume = 0f
+                        }
                     )
                 }
             } else {
                 rawPlayer.pause()
-                controller?.pause() // Pause ExoPlayer when user explicitly pauses
+                controller?.pause()
             }
         }
         
