@@ -1097,6 +1097,15 @@ class PlayerViewModel @Inject constructor(
             // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
             controller?.volume = 0f 
             
+            val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+                                   reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            if (shouldCrossfade) {
+                rawPlayer.isExoPlaying = true
+                controller?.play()
+            } else {
+                rawPlayer.isExoPlaying = controller?.playWhenReady == true
+            }
+
             reduce {
                 it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
             }
@@ -1118,8 +1127,6 @@ class PlayerViewModel @Inject constructor(
                     
                     // ONLY crossfade on AUTO transition (next song) or REPEAT. 
                     // Manual seeks get 0 seconds for instant, hiccup-free switching.
-                    val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                                           reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                     val fadeSeconds = if (shouldCrossfade) getCrossfadeSeconds() else 0
                     
                     rawPlayer.playUri(context, uri, 0L, fadeSeconds,
@@ -1136,6 +1143,7 @@ class PlayerViewModel @Inject constructor(
                 rawPlayer.stop()
             }
         }
+
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             reduce { it.withNowPlaying(controller) }
         }
