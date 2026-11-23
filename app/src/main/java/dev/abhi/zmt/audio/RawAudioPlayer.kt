@@ -106,6 +106,7 @@ fun playUri(
                 decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
             }.apply { start() }
         }
+}
 
 
     private fun decodeAndPlay(
