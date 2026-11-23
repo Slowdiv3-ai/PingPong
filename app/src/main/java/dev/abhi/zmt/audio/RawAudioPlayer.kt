@@ -92,25 +92,20 @@ fun playUri(
                 Handler(Looper.getMainLooper()).post { onError(e.toString()) }
             }
         }.apply { start() }
-    } else {
-        // 1. Interrupt old thread and immediately stop/flush its AudioTrack so WRITE_BLOCKING unblocks without .join()
-        playbackThread?.interrupt()
-        outgoingThread?.interrupt()
-        outgoingThread = null
-        
-        val oldTrack = currentAudioTrack
-        currentAudioTrack = null
-        try {
-            oldTrack?.pause()
-            oldTrack?.flush()
-            oldTrack?.release()
-        } catch (_: Exception) {}
+        } else {
+            // Interrupt old threads; their own finally blocks will stop/release their AudioTracks off the UI thread.
+            playbackThread?.interrupt()
+            outgoingThread?.interrupt()
+            outgoingThread = null
+            
+            // Only pause() the old track on the UI thread (non-blocking) to silence it immediately.
+            try { currentAudioTrack?.pause() } catch (_: Exception) {}
+            currentAudioTrack = null
 
-        playbackThread = Thread {
-            decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
-        }.apply { start() }
-    }
-}
+            playbackThread = Thread {
+                decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
+            }.apply { start() }
+        }
 
 
     private fun decodeAndPlay(
@@ -464,8 +459,9 @@ fun playUri(
     }
     
     fun resume() { 
+        isExoPlaying = true
         val track = currentAudioTrack
-        try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PAUSED) track.play() } catch (_: Exception) {}
+        try { if (track != null && track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play() } catch (_: Exception) {}
     }
     
     fun refreshAudioTrack() {
