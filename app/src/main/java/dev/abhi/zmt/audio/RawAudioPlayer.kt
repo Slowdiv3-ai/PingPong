@@ -195,20 +195,17 @@ class RawAudioPlayer {
                     continue
                 }
 
-                if (!isOutgoing && currentMode == PanMode.CUSTOM && customPresets.isNotEmpty() && !customModeIsLayered) {
-                    val now = System.currentTimeMillis()
                     if (now - lastSwitchTime > intervalSeconds * 1000) {
                         outgoingPreset = currentPreset
                         currentCustomIndex = (currentCustomIndex + 1) % customPresets.size
                         currentPreset = customPresets[currentCustomIndex]
                         lastSwitchTime = now
                         transitionProgress = 0.0f
-                        
-                        // CRITICAL FIX: Do NOT reset filters or LFO phase here. 
-                        // Keeping them continuous prevents the "electric shock" click during transitions.
+                        lofiCounter = 4
                         
                         Log.d(TAG, "🔄 Switched to preset: $currentPreset")
                     }
+
                     if (outgoingPreset != null) {
                         val elapsed = System.currentTimeMillis() - lastSwitchTime
                         val effectiveDuration = minOf(transitionDurationMs, (intervalSeconds * 600f).toLong().coerceAtLeast(1000L))
@@ -280,11 +277,16 @@ class RawAudioPlayer {
                                     currentPreset = oldPreset
                                 }
                             } else if (outgoingPreset != null && transitionProgress < 1.0f) {
+                                val angle = transitionProgress * (PI.toFloat() / 2.0f)
+                                val outGain = cos(angle)
+                                val inGain = sin(angle)
                                 val outBytes = bytes.copyOf(bufferInfo.size)
-                                applySinglePreset(outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f - transitionProgress)
-                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, transitionProgress)
+                                applySinglePreset(outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, outGain)
+                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, inGain)
                                 mixPcmBuffers(bytes, outBytes, bufferInfo.size)
                             } else {
+
+                    
                                 // Apply the current preset directly. Continuous LFO/filter states ensure no clicks.
                                 applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
                             }
@@ -458,6 +460,10 @@ class RawAudioPlayer {
                 lofiCounter = 0
                 lofiHoldL = (sampleL * levels).toInt().toFloat() / levels
                 lofiHoldR = (sampleR * levels).toInt().toFloat() / levels
+                if (lofiSmoothL == 0f && lofiSmoothR == 0f) {
+                    lofiSmoothL = lofiHoldL
+                    lofiSmoothR = lofiHoldR
+                }
             }
             val alpha = 0.2f
             val smoothL = lofiSmoothL + alpha * (lofiHoldL - lofiSmoothL); lofiSmoothL = smoothL
@@ -465,7 +471,7 @@ class RawAudioPlayer {
             val outL = smoothL * gain; val outR = smoothR * gain
             val sL = (outL.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
-            val sR = (smoothR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
             i += 4
         }
