@@ -1089,12 +1089,19 @@ class PlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
-            controller?.volume = 0f 
-            
-            reduce {
-                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
-            }
+    controller?.volume = 0f 
+    
+    // Force ExoPlayer to keep advancing its clock on auto-transitions
+    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+        reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+        controller?.play()
+    }
+
+    reduce {
+        it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
+    }
+    // ... rest of your existing code ...
+
             loadCover(mediaItem)
             loadTech(mediaItem)
             loadLyrics(mediaItem)
@@ -1136,26 +1143,15 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            reduce { it.copy(isPlaying = isPlaying) }
-            if (isPlaying) {
-                controller?.volume = 0f
-                val uri = currentTrackUri
-                if (uri != null) {
-                    rawPlayer.playUri(context, uri, controller?.currentPosition ?: 0L, 0,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "Resume error: $msg")
-                            controller?.volume = 1f
-                        },
-                        onSuccess = { 
-                            controller?.volume = 0f
-                        }
-                    )
-                }
-            } else {
-                rawPlayer.pause()
-                controller?.pause()
-            }
-        }
+    reduce { it.copy(isPlaying = isPlaying) }
+    if (isPlaying) {
+        controller?.volume = 0f
+        rawPlayer.resume() // Just resume the AudioTrack! Do NOT call playUri() here.
+    } else {
+        rawPlayer.pause()
+    }
+}
+
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
