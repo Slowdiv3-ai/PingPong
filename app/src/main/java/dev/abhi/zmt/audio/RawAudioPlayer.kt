@@ -184,7 +184,7 @@ class RawAudioPlayer {
             
             var outgoingPreset: PanPreset? = null
             var transitionProgress = 1.0f
-            val transitionDurationMs = 1200L
+            val transitionDurationMs = 3000L
             
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
@@ -211,11 +211,15 @@ class RawAudioPlayer {
                     }
                     if (outgoingPreset != null) {
                         val elapsed = System.currentTimeMillis() - lastSwitchTime
-                        transitionProgress = (elapsed.toFloat() / transitionDurationMs).coerceIn(0f, 1f)
-                        if (transitionProgress >= 1.0f) {
+                        val effectiveDuration = minOf(transitionDurationMs, (intervalSeconds * 600f).toLong().coerceAtLeast(1000L))
+                        val rawT = (elapsed.toFloat() / effectiveDuration).coerceIn(0f, 1f)
+                        transitionProgress = rawT * rawT * (3f - 2f * rawT)
+                        if (rawT >= 1.0f) {
                             outgoingPreset = null
                         }
                     }
+
+
                 }
 
                 var currentGain = 1.0f
@@ -275,10 +279,16 @@ class RawAudioPlayer {
                                     applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
                                     currentPreset = oldPreset
                                 }
+                            } else if (outgoingPreset != null && transitionProgress < 1.0f) {
+                                val outBytes = bytes.copyOf(bufferInfo.size)
+                                applySinglePreset(outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f - transitionProgress)
+                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, transitionProgress)
+                                mixPcmBuffers(bytes, outBytes, bufferInfo.size)
                             } else {
                                 // Apply the current preset directly. Continuous LFO/filter states ensure no clicks.
                                 applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f)
                             }
+
                             
                             if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
                         } else {
@@ -339,6 +349,19 @@ class RawAudioPlayer {
             PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, size, sampleRate, lfoStep, gain)
         }
     }
+
+    private fun mixPcmBuffers(target: ByteArray, addend: ByteArray, size: Int) {
+        var i = 0
+        while (i < size - 1) {
+            val a = ((target[i].toInt() and 0xFF) or ((target[i + 1].toInt() and 0xFF) shl 8)).toShort().toInt()
+            val b = ((addend[i].toInt() and 0xFF) or ((addend[i + 1].toInt() and 0xFF) shl 8)).toShort().toInt()
+            val mixed = (a + b).coerceIn(-32768, 32767)
+            target[i] = (mixed and 0xFF).toByte()
+            target[i + 1] = (mixed shr 8).toByte()
+            i += 2
+        }
+    }
+
 
     private fun applyFade(bytes: ByteArray, size: Int, gain: Float) {
         var i = 0
