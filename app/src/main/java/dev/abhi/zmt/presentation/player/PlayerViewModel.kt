@@ -1478,18 +1478,22 @@ class PlayerViewModel @Inject constructor(
         }
         sessionRestored = true
         viewModelScope.launch {
+        viewModelScope.launch {
             val session = preferencesRepository.lastSession() ?: return@launch
             val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
             indexTracks(existing)
             c.playWhenReady = false
             rawPlayer.isExoPlaying = false
+            rawPlayer.pause()
             c.setMediaItems(
                 existing.map { it.toMediaItem() },
                 index,
                 position,
             )
             c.prepare()
+            c.pause()
         }
+
     }
 
     private fun fetchOnlineLyrics() {
