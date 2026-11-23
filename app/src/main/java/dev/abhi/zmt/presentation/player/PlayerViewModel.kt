@@ -1184,6 +1184,13 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isRestoringSession && isPlaying) {
+                controller?.pause()
+                rawPlayer.isExoPlaying = false
+                rawPlayer.pause()
+                reduce { it.copy(isPlaying = false) }
+                return
+            }
             val shouldBePlaying = isPlaying || (controller?.playWhenReady == true && controller?.playbackState == Player.STATE_BUFFERING)
             rawPlayer.isExoPlaying = shouldBePlaying
             reduce { it.copy(isPlaying = isPlaying) }
@@ -1194,6 +1201,7 @@ class PlayerViewModel @Inject constructor(
                 rawPlayer.pause()
             }
         }
+        
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_BUFFERING) {
@@ -1467,6 +1475,8 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private var isRestoringSession = false
+
     private fun restoreSession() {
         if (sessionRestored) return
         val c = controller ?: return
@@ -1480,6 +1490,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val session = preferencesRepository.lastSession() ?: return@launch
             val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
+            isRestoringSession = true
             indexTracks(existing)
             c.playWhenReady = false
             rawPlayer.isExoPlaying = false
@@ -1491,9 +1502,11 @@ class PlayerViewModel @Inject constructor(
             )
             c.prepare()
             c.pause()
+            delay(400L)
+            isRestoringSession = false
         }
-
     }
+    
 
     private fun fetchOnlineLyrics() {
         val id = currentState.nowPlayingId ?: return
