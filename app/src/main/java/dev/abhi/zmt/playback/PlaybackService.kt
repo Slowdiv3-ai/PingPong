@@ -452,7 +452,11 @@ class PlaybackService : MediaLibraryService() {
                     session.player.repeatMode = when (session.player.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
                     Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
-                CMD_SET_VOLUME.customAction -> { session.player.volume = args.getFloat(KEY_VOLUME, 1f).coerceIn(0f, 1f); Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) }
+                CMD_SET_VOLUME.customAction -> { 
+                    // CRITICAL: Do NOT change ExoPlayer volume. RawAudioPlayer handles volume.
+                    // session.player.volume = args.getFloat(KEY_VOLUME, 1f).coerceIn(0f, 1f)
+                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) 
+                }
                 CMD_SET_EQ_PRESET.customAction -> {
                     scope.launch { preferencesRepository.save(preferencesRepository.settings.first().copy(equalizerPreset = args.getInt(KEY_PRESET_INDEX, -1))) }
                     Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
