@@ -48,7 +48,7 @@ class RawAudioPlayer {
     private var lofiSmoothL = 0.0f; private var lofiSmoothR = 0.0f
     private var lofiCounter = 0
 
-    @Volatile var isExoPlaying = true
+    @Volatile var isExoPlaying = false
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
     @Volatile private var outgoingThread: Thread? = null
