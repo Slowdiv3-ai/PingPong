@@ -48,6 +48,7 @@ class RawAudioPlayer {
     private var lofiSmoothL = 0.0f; private var lofiSmoothR = 0.0f
     private var lofiCounter = 0
 
+    @Volatile var isExoPlaying = true
     @Volatile private var isPlaying = false
     @Volatile private var playbackThread: Thread? = null
     @Volatile private var outgoingThread: Thread? = null
@@ -164,9 +165,14 @@ fun playUri(
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                 .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-            
-            if (!isOutgoing) currentAudioTrack = localAudioTrack
-            localAudioTrack.play()
+                        if (!isOutgoing) {
+                currentAudioTrack = localAudioTrack
+                if (isExoPlaying) {
+                    localAudioTrack.play()
+                }
+            } else {
+                localAudioTrack.play()
+            }
 
             val bufferInfo = MediaCodec.BufferInfo()
             var sawInputEOS = false
