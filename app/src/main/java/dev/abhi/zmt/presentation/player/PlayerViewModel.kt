@@ -1478,7 +1478,6 @@ class PlayerViewModel @Inject constructor(
         }
         sessionRestored = true
         viewModelScope.launch {
-        viewModelScope.launch {
             val session = preferencesRepository.lastSession() ?: return@launch
             val (existing, index, position) = session.resolveQueue(tracks) ?: return@launch
             indexTracks(existing)
