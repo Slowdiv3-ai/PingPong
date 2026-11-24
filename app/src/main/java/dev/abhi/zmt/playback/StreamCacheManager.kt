@@ -139,6 +139,7 @@ class StreamCacheManager @Inject constructor(
             if (tmp.length() > 0) {
                 tmp.renameTo(target)
                 Log.d(TAG, "Download done: $streamUri (${target.length()} bytes)")
+                evictIfNeeded()
                 return target
             }
             tmp.delete()
@@ -180,7 +181,7 @@ class StreamCacheManager @Inject constructor(
      * Evict oldest files when cache exceeds [maxBytes].
      * Runs on a background thread — safe to call from any coroutine.
      */
-    fun evictIfNeeded(maxBytes: Long = 512L * 1024 * 1024) {
+    fun evictIfNeeded(maxBytes: Long = 100L * 1024 * 1024) {
         val files = cacheDir.listFiles()?.filter { it.length() > 0 }?.sortedBy { it.lastModified() } ?: return
         var total = files.sumOf { it.length() }
         for (file in files) {
