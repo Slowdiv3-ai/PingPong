@@ -1138,32 +1138,37 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // Resolve YouTube stream URL + User-Agent on IO thread, then feed to RawAudioPlayer
+        // Resolve & cache YouTube audio to a local file so MediaExtractor + DSP work 100% natively
         viewModelScope.launch {
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
-            val resolved = withContext(Dispatchers.IO) { youtubeStreamResolver.resolve(videoId) }
-            if (resolved == null) {
-                Log.e("RawAudioPlayer", "Resolver returned null for $videoId")
-                onError("Could not resolve YouTube stream for $videoId")
+            val cachedFile = withContext(Dispatchers.IO) {
+                streamCache.downloadSync(
+                    streamUri = uriStr,
+                    resolveUrl = {
+                        youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) }
+                    }
+                )
+            }
+            if (cachedFile == null) {
+                Log.e("RawAudioPlayer", "Download/resolve failed for $videoId")
+                onError("Could not load YouTube stream for $videoId")
                 return@launch
             }
-            Log.d("RawAudioPlayer", "Resolved $videoId via ${resolved.resolverName}")
-            val resolvedUri = Uri.parse(resolved.url)
-            val headers = mapOf("User-Agent" to resolved.userAgent)
-            currentTrackUri = resolvedUri
-            currentTrackHeaders = headers
-            // Ensure RawAudioPlayer is unpaused if ExoPlayer is playing or buffering
+            Log.d("RawAudioPlayer", "Playing cached stream for $videoId (${cachedFile.length()} bytes)")
+            val fileUri = Uri.fromFile(cachedFile)
+            currentTrackUri = fileUri
+            currentTrackHeaders = null
             if (controller?.playWhenReady == true || controller?.isPlaying == true) {
                 rawPlayer.isExoPlaying = true
             }
             rawPlayer.playUri(
                 context,
-                resolvedUri,
+                fileUri,
                 startTimeMs,
                 crossfadeSeconds,
-                headers,
+                null,
                 onError = { err ->
-                    Log.e("RawAudioPlayer", "MediaExtractor failed ($err), unmuting ExoPlayer fallback")
+                    Log.e("RawAudioPlayer", "DSP playback failed ($err), unmuting ExoPlayer fallback")
                     onError(err)
                 },
                 onSuccess = onSuccess
