@@ -229,13 +229,12 @@ class RawAudioPlayer {
                 if (Thread.currentThread().isInterrupted) break
 
                 if (!isOutgoing && !isExoPlaying) {
-                    if (localAudioTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                        try { localAudioTrack.pause() } catch (_: Exception) {}
+                    if (localAudioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        try { localAudioTrack?.pause() } catch (_: Exception) {}
                     }
                     try { Thread.sleep(25) } catch (_: InterruptedException) { break }
                     continue
                 }
-
                 if (!isOutgoing) {
 
                     val now = System.currentTimeMillis()
