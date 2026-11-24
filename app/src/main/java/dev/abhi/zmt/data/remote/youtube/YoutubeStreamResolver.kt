@@ -229,13 +229,14 @@ class YoutubeStreamResolver @Inject constructor(
                 return null
             }
 
-            val userAgent = when (label) {
-                "VISIONOS" -> UserAgents.VISIONOS
-                "ANDROID_VR" -> UserAgents.ANDROID_VR
-                "ANDROID_MUSIC" -> UserAgents.ANDROID_MUSIC
-                "IOS" -> UserAgents.IOS
-                "WEB_REMIX" -> UserAgents.DESKTOP
-                "TVHTML5" -> UserAgents.TV
+            val userAgent = when {
+                url.contains("c=IOS") -> UserAgents.IOS
+                url.contains("c=ANDROID_VR") -> UserAgents.ANDROID_VR
+                url.contains("c=ANDROID_MUSIC") -> UserAgents.ANDROID_MUSIC
+                url.contains("c=TVHTML5") -> UserAgents.TV
+                label == "ANDROID_VR" -> UserAgents.ANDROID_VR
+                label == "IOS" -> UserAgents.IOS
+                label == "TVHTML5" -> UserAgents.TV
                 else -> UserAgents.IOS
             }
 
