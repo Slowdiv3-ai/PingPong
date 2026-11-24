@@ -181,7 +181,7 @@ data class Context(
             client = Client(
                 clientId = 28,
                 clientName = "ANDROID_VR",
-                clientVersion = "1.65.10",
+                clientVersion = "1.71.26",
                 platform = "MOBILE",
                 osName = "Android",
                 osVersion = "12L",
