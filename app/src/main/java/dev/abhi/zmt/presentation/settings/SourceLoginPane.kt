@@ -60,6 +60,34 @@ fun SourceLoginPane(mode: SourceMode, state: DmtState, dispatch: (DmtAction) -> 
 @Composable
 private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
     var captured by remember { mutableStateOf(false) }
+    var redirectedToYtm by remember { mutableStateOf(false) }
+
+    fun tryCaptureCookies(): Boolean {
+        if (captured) return true
+        val cm = CookieManager.getInstance()
+        val ytmCookies = cm.getCookie("https://youtube.com").orEmpty()
+        val ytCookies = cm.getCookie("https://youtube.com").orEmpty()
+        val combined = listOf(ytmCookies, ytCookies)
+            .filter { it.isNotBlank() }
+            .joinToString("; ")
+        val isLoggedIn = combined.contains("SAPISID=") || combined.contains("__Secure-3PAPISID=")
+        if (isLoggedIn) {
+            captured = true
+            cm.flush()
+            Innertube.cookie = combined
+            dispatch(
+                DmtAction.Config(
+                    state.settings.copy(
+                        sourceMode = SourceMode.YOUTUBE,
+                        youtubeCookie = combined,
+                    )
+                )
+            )
+            dispatch(DmtAction.Show(DmtView.HOME))
+            return true
+        }
+        return false
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -68,6 +96,16 @@ private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Un
         ) {
             Caption("youtube music sign in")
             Spacer(modifier = Modifier.weight(1f))
+            TuiKey(
+                label = "[ done ]",
+                bright = true,
+                onClick = {
+                    if (!tryCaptureCookies()) {
+                        dispatch(DmtAction.Show(DmtView.SOURCES))
+                    }
+                },
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             TuiKey(
                 label = "[ cancel ]",
                 onClick = { dispatch(DmtAction.Show(DmtView.SOURCES)) },
@@ -87,30 +125,26 @@ private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Un
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             if (captured || url == null) return
-                            val cookies = CookieManager.getInstance().getCookie("https://youtube.com").orEmpty()
-                            val isLoggedIn = cookies.contains("SAPISID=") || cookies.contains("__Secure-3PAPISID=")
-                            if (url.startsWith("https://youtube.com") && isLoggedIn) {
-                                captured = true
-                                CookieManager.getInstance().flush()
-                                Innertube.cookie = cookies
-                                dispatch(
-                                    DmtAction.Config(
-                                        state.settings.copy(
-                                            sourceMode = SourceMode.YOUTUBE,
-                                            youtubeCookie = cookies,
-                                        )
-                                    )
-                                )
-                                dispatch(DmtAction.Show(DmtView.HOME))
+
+                            // If Google finished sign-in on myaccount/accounts but stayed there, force-navigate to ://youtube.com
+                            if (!redirectedToYtm && (url.startsWith("https://google.com") || url.contains("://google.com"))) {
+                                redirectedToYtm = true
+                                view?.loadUrl("https://youtube.com")
+                                return
+                            }
+
+                            if (url.startsWith("https://youtube.com") || url.startsWith("https://youtube.com")) {
+                                tryCaptureCookies()
                             }
                         }
                     }
-                    loadUrl("https://google.com")
+                    loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2F://youtube.com")
                 }
             },
         )
     }
 }
+
 
 @Composable
 private fun TelegramLoginPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
