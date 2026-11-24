@@ -321,8 +321,8 @@ class RawAudioPlayer {
                         } else if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
 
                             if (customModeIsLayered) {
-                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f, mainFilter)
-                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, layeredTelFilter)
+                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f, 1.0f, mainFilter)
+                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredFreqFilter)
                                 if (customPresets.any { it.name.startsWith("FREQ_") }) {
                                     val freqPreset = customPresets.first { it.name.startsWith("FREQ_") }
                                     val oldPreset = currentPreset; currentPreset = freqPreset
@@ -341,11 +341,11 @@ class RawAudioPlayer {
                                     currentPreset = oldPreset
                                 }
                             } else {
-                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, mainFilter)
+                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, mainFilter)
                             }
                             if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
                         } else {
-                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain, mainFilter)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain, currentGain, mainFilter)
                         }
 
 
