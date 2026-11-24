@@ -1143,14 +1143,31 @@ class PlayerViewModel @Inject constructor(
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
             val resolved = withContext(Dispatchers.IO) { youtubeStreamResolver.resolve(videoId) }
             if (resolved == null) {
+                Log.e("RawAudioPlayer", "Resolver returned null for $videoId")
                 onError("Could not resolve YouTube stream for $videoId")
                 return@launch
             }
+            Log.d("RawAudioPlayer", "Resolved $videoId via ${resolved.resolverName}")
             val resolvedUri = Uri.parse(resolved.url)
             val headers = mapOf("User-Agent" to resolved.userAgent)
             currentTrackUri = resolvedUri
             currentTrackHeaders = headers
-            rawPlayer.playUri(context, resolvedUri, startTimeMs, crossfadeSeconds, headers, onError, onSuccess)
+            // Ensure RawAudioPlayer is unpaused if ExoPlayer is playing or buffering
+            if (controller?.playWhenReady == true || controller?.isPlaying == true) {
+                rawPlayer.isExoPlaying = true
+            }
+            rawPlayer.playUri(
+                context,
+                resolvedUri,
+                startTimeMs,
+                crossfadeSeconds,
+                headers,
+                onError = { err ->
+                    Log.e("RawAudioPlayer", "MediaExtractor failed ($err), unmuting ExoPlayer fallback")
+                    onError(err)
+                },
+                onSuccess = onSuccess
+            )
         }
     }
 
