@@ -85,6 +85,7 @@ class PreferencesRepository @Inject constructor(
             telegramChannelId = prefs[KEY_TELEGRAM_CHANNEL_ID],
             telegramChannelName = prefs[KEY_TELEGRAM_CHANNEL_NAME],
             telegramAuthState = prefs[KEY_TELEGRAM_AUTH_STATE],
+            youtubeCookie = prefs[KEY_YOUTUBE_COOKIE],
             crossfadeDuration = CrossfadeDuration.entries[(prefs[KEY_CROSSFADE] ?: 0).coerceIn(0, CrossfadeDuration.entries.size - 1)],
             sleepFade = SleepFade.entries[(prefs[KEY_SLEEP_FADE] ?: 0).coerceIn(0, SleepFade.entries.size - 1)],
             equalizerPreset = prefs[KEY_EQUALIZER_PRESET] ?: -1,
@@ -128,6 +129,9 @@ class PreferencesRepository @Inject constructor(
             settings.telegramAuthState
                 ?.let { state -> it[KEY_TELEGRAM_AUTH_STATE] = state }
                 ?: it.remove(KEY_TELEGRAM_AUTH_STATE)
+            settings.youtubeCookie
+                ?.let { cookie -> it[KEY_YOUTUBE_COOKIE] = cookie }
+                ?: it.remove(KEY_YOUTUBE_COOKIE)
             it[KEY_CROSSFADE] = settings.crossfadeDuration.ordinal
             it[KEY_SLEEP_FADE] = settings.sleepFade.ordinal
             it[KEY_EQUALIZER_PRESET] = settings.equalizerPreset
