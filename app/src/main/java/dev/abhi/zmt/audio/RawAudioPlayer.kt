@@ -214,6 +214,8 @@ class RawAudioPlayer {
             var transitionStartMs = 0L
             var transitionProgress = 1.0f
             val transitionDurationMs = 2500L
+            var lastOutGain = 1.0f
+            var lastInGain = 0.0f
 
             while (!sawOutputEOS) {
                 if (Thread.currentThread().isInterrupted) break
@@ -248,6 +250,8 @@ class RawAudioPlayer {
                         lastActivePreset = currentPreset
                         transitionStartMs = now
                         transitionProgress = 0.0f
+                        lastOutGain = 1.0f
+                        lastInGain = 0.0f
                     }
 
 
@@ -306,13 +310,16 @@ class RawAudioPlayer {
 
                         if (!isOutgoing && outgoingMode != null && outgoingPreset != null && transitionProgress < 1.0f) {
                             val angle = transitionProgress * (PI.toFloat() / 2.0f)
-                            val outGain = cos(angle) * currentGain
-                            val inGain = sin(angle) * currentGain
+                            val targetOutGain = cos(angle) * currentGain
+                            val targetInGain = sin(angle) * currentGain
                             val outBytes = bytes.copyOf(bufferInfo.size)
-                            applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, outGain, outgoingFilter)
-                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, inGain, mainFilter)
+                            applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, lastOutGain, targetOutGain, outgoingFilter)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, lastInGain, targetInGain, mainFilter)
                             mixPcmBuffers(bytes, outBytes, bufferInfo.size)
+                            lastOutGain = targetOutGain
+                            lastInGain = targetInGain
                         } else if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
+
                             if (customModeIsLayered) {
                                 if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f, mainFilter)
                                 if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, layeredTelFilter)
@@ -378,29 +385,47 @@ class RawAudioPlayer {
             } catch (_: Exception) {}
         }
     }
-
-    private fun applyModeAndPreset(mode: PanMode, preset: PanPreset, bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float, state: FilterState) {
+    private fun applyModeAndPreset(
+        mode: PanMode,
+        preset: PanPreset,
+        bytes: ByteArray,
+        size: Int,
+        sampleRate: Int,
+        lfoStep: Float,
+        startGain: Float,
+        endGain: Float = startGain,
+        state: FilterState
+    ) {
         val savedPreset = currentPreset
         currentPreset = preset
         when (mode) {
-            PanMode.OFF -> applyFade(bytes, size, gain)
-            PanMode.VOLUME -> applyVolumePan(bytes, size, lfoStep, gain)
-            PanMode.FREQUENCY -> applyFrequencyPan(bytes, size, sampleRate, lfoStep, gain, state)
-            PanMode.TREMOLO -> applyTremolo(bytes, size, lfoStep, gain)
-            PanMode.LOFI -> applyLoFi(bytes, size, lfoStep, gain, state)
-            PanMode.TELEPHONE -> applyTelephone(bytes, size, sampleRate, lfoStep, gain, state)
-            PanMode.CUSTOM -> applySinglePreset(preset, bytes, size, sampleRate, lfoStep, gain, state)
+            PanMode.OFF -> applyFade(bytes, size, startGain, endGain)
+            PanMode.VOLUME -> applyVolumePan(bytes, size, lfoStep, startGain, endGain)
+            PanMode.FREQUENCY -> applyFrequencyPan(bytes, size, sampleRate, lfoStep, startGain, endGain, state)
+            PanMode.TREMOLO -> applyTremolo(bytes, size, lfoStep, startGain, endGain)
+            PanMode.LOFI -> applyLoFi(bytes, size, lfoStep, startGain, endGain, state)
+            PanMode.TELEPHONE -> applyTelephone(bytes, size, sampleRate, lfoStep, startGain, endGain, state)
+            PanMode.CUSTOM -> applySinglePreset(preset, bytes, size, sampleRate, lfoStep, startGain, endGain, state)
         }
         currentPreset = savedPreset
     }
 
-    private fun applySinglePreset(preset: PanPreset, bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float, state: FilterState) {
+    private fun applySinglePreset(
+        preset: PanPreset,
+        bytes: ByteArray,
+        size: Int,
+        sampleRate: Int,
+        lfoStep: Float,
+        startGain: Float,
+        endGain: Float = startGain,
+        state: FilterState
+    ) {
         when (preset) {
-            PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, size, lfoStep, gain)
-            PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> applyFrequencyPan(bytes, size, sampleRate, lfoStep, gain, state)
-            PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, size, lfoStep, gain)
-            PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, size, lfoStep, gain, state)
-            PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, size, sampleRate, lfoStep, gain, state)
+            PanPreset.VOL_SMOOTH, PanPreset.VOL_GENTLE, PanPreset.VOL_CHOP -> applyVolumePan(bytes, size, lfoStep, startGain, endGain)
+            PanPreset.FREQ_HELICOPTER, PanPreset.FREQ_DEEP_BASS, PanPreset.FREQ_HI_HATS, PanPreset.FREQ_UNDERWATER -> applyFrequencyPan(bytes, size, sampleRate, lfoStep, startGain, endGain, state)
+            PanPreset.TREMOLO_SINE, PanPreset.TREMOLO_SQUARE -> applyTremolo(bytes, size, lfoStep, startGain, endGain)
+            PanPreset.LOFI_8BIT, PanPreset.LOFI_4BIT -> applyLoFi(bytes, size, lfoStep, startGain, endGain, state)
+            PanPreset.TEL_VINTAGE, PanPreset.TEL_RADIO -> applyTelephone(bytes, size, sampleRate, lfoStep, startGain, endGain, state)
         }
     }
 
@@ -418,9 +443,10 @@ class RawAudioPlayer {
         }
     }
 
-
-    private fun applyFade(bytes: ByteArray, size: Int, gain: Float) {
+    private fun applyFade(bytes: ByteArray, size: Int, startGain: Float, endGain: Float = startGain) {
         var i = 0
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort()
             val sR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort()
@@ -428,13 +454,15 @@ class RawAudioPlayer {
             val outR = (sR * gain).toInt().toShort()
             bytes[i] = (outL.toInt() and 0xFF).toByte(); bytes[i+1] = (outL.toInt() shr 8).toByte()
             bytes[i+2] = (outR.toInt() and 0xFF).toByte(); bytes[i+3] = (outR.toInt() shr 8).toByte()
-            i += 4
+            i += 4; gain += gainStep
         }
     }
 
-    private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float) {
+    private fun applyVolumePan(bytes: ByteArray, size: Int, lfoStep: Float, startGain: Float, endGain: Float = startGain) {
         var i = 0
         var phase = lfoPhase
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
@@ -446,13 +474,16 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
+            i += 4; gain += gainStep; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
-    private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float, state: FilterState) {
+   
+    private fun applyFrequencyPan(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, startGain: Float, endGain: Float = startGain, state: FilterState) {
         var i = 0
         var phase = lfoPhase
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
@@ -479,14 +510,17 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
+            i += 4; gain += gainStep; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
 
-    private fun applyTremolo(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float) {
+
+    private fun applyTremolo(bytes: ByteArray, size: Int, lfoStep: Float, startGain: Float, endGain: Float = startGain) {
         var i = 0
         var phase = lfoPhase
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
@@ -498,15 +532,18 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
+            i += 4; gain += gainStep; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
 
-    private fun applyLoFi(bytes: ByteArray, size: Int, lfoStep: Float, gain: Float, state: FilterState) {
+
+    private fun applyLoFi(bytes: ByteArray, size: Int, lfoStep: Float, startGain: Float, endGain: Float = startGain, state: FilterState) {
         var i = 0
         val bits = if (currentPreset == PanPreset.LOFI_4BIT) 4 else 8
         val levels = (1 shl bits).toFloat()
         val reduction = 4
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
@@ -528,16 +565,18 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4
+            i += 4; gain += gainStep
         }
     }
 
 
-    private fun applyTelephone(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, gain: Float, state: FilterState) {
+    private fun applyTelephone(bytes: ByteArray, size: Int, sampleRate: Int, lfoStep: Float, startGain: Float, endGain: Float = startGain, state: FilterState) {
         var i = 0
         var phase = lfoPhase
         val baseHighCut = if (currentPreset == PanPreset.TEL_VINTAGE) 2500f else 3500f
         val baseLowCut = 300f
+        val gainStep = (endGain - startGain) / (size / 4).coerceAtLeast(1)
+        var gain = startGain
         while (i < size - 3) {
             val sampleL = (bytes[i].toInt() and 0xFF or ((bytes[i+1].toInt() and 0xFF) shl 8)).toShort() / 32768f
             val sampleR = (bytes[i+2].toInt() and 0xFF or ((bytes[i+3].toInt() and 0xFF) shl 8)).toShort() / 32768f
@@ -555,10 +594,9 @@ class RawAudioPlayer {
             bytes[i] = (sL.toInt() and 0xFF).toByte(); bytes[i+1] = (sL.toInt() shr 8).toByte()
             val sR = (outR.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             bytes[i+2] = (sR.toInt() and 0xFF).toByte(); bytes[i+3] = (sR.toInt() shr 8).toByte()
-            i += 4; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
+            i += 4; gain += gainStep; phase += lfoStep; if (phase > 2.0f * PI.toFloat()) phase -= 2.0f * PI.toFloat()
         }
     }
-
 
     fun pause() { 
         isExoPlaying = false
