@@ -1132,9 +1132,19 @@ class PlayerViewModel @Inject constructor(
         private var lastPlayUriTime = 0L
     private var lastPlayUriString = ""
     private var crossfadedForTrackId: String? = null
-    
+
     private fun getCrossfadeSeconds(): Int =
         currentState.settings.crossfadeDuration.seconds
+
+    private fun loadYoutubeHome() {
+        if (currentState.ytHomeLoading) return
+        reduce { it.copy(ytHomeLoading = true) }
+        viewModelScope.launch {
+            val feed = withContext(Dispatchers.IO) { youtubeRepository.homeFeed() }
+            reduce { it.copy(ytHome = feed, ytHomeLoading = false) }
+        }
+    }
+
 
     private var currentTrackHeaders: Map<String, String>? = null
     private var resolveJob: Job? = null
