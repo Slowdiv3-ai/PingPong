@@ -89,8 +89,12 @@ private val SOURCE_REGISTRY = listOf(
     SourceDescriptor(
         mode = SourceMode.YOUTUBE,
         label = SourceMode.YOUTUBE.label,
-        subtitle = { "stream from YouTube Music" },
+        subtitle = { settings ->
+            if (!settings.youtubeCookie.isNullOrBlank()) "signed in via cookies" else "stream from YouTube Music (tap login for feed)"
+        },
         requiresAuth = false,
+        connected = { !it.youtubeCookie.isNullOrBlank() },
+        logout = { it.copy(youtubeCookie = null) },
     ),
 )
 
@@ -104,11 +108,12 @@ fun SourcesPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
         SOURCE_REGISTRY.forEach { source ->
             val connected = source.connected(settings)
             val needsGrant = source.mode == SourceMode.LOCAL && !state.hasPermission
+            val supportsLogin = source.requiresAuth || source.mode == SourceMode.YOUTUBE
             SourceRow(
                 label = source.label,
                 subtitle = source.subtitle(settings),
                 active = settings.sourceMode == source.mode,
-                needsLogin = source.requiresAuth && !connected,
+                needsLogin = supportsLogin && !connected,
                 onGrant = if (needsGrant) {
                     { dispatch(DmtAction.Show(DmtView.PERMISSIONS)) }
                 } else {
@@ -121,8 +126,18 @@ fun SourcesPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
                         dispatch(DmtAction.Config(settings.copy(sourceMode = source.mode)))
                     }
                 },
-                onLogout = if (source.requiresAuth && connected) {
-                    { dispatch(DmtAction.Config(source.logout(settings))) }
+                onLogin = if (supportsLogin && !connected) {
+                    { dispatch(DmtAction.ShowLogin(source.mode)) }
+                } else {
+                    null
+                },
+                onLogout = if (supportsLogin && connected) {
+                    {
+                        if (source.mode == SourceMode.YOUTUBE) {
+                            dev.abhi.zmt.data.remote.youtube.innertube.Innertube.cookie = null
+                        }
+                        dispatch(DmtAction.Config(source.logout(settings)))
+                    }
                 } else {
                     null
                 },
@@ -182,6 +197,7 @@ private fun SourceRow(
     active: Boolean,
     needsLogin: Boolean,
     onSelect: () -> Unit,
+    onLogin: (() -> Unit)? = null,
     onLogout: (() -> Unit)?,
     onGrant: (() -> Unit)?,
 ) {
@@ -231,7 +247,7 @@ private fun SourceRow(
             if (needsLogin) {
                 TuiKey(
                     label = "[ ${stringResource(R.string.source_login)} ]",
-                    onClick = onSelect,
+                    onClick = onLogin ?: onSelect,
                 )
             }
             onLogout?.let {
