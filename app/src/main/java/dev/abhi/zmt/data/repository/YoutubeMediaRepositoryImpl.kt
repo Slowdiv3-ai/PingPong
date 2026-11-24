@@ -205,6 +205,35 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
                 }
             }
 
+            // 2b. Fallback: if FEmusic_home & FEmusic_explore returned empty, populate via Innertube search
+            if (tracks.isEmpty()) {
+                val fallbackTracks = search("top hits music")
+                tracks.addAll(fallbackTracks)
+            }
+            if (playlists.isEmpty()) {
+                runCatching {
+                    val plResult = Innertube.searchPage(
+                        body = SearchBody(
+                            query = "top hits playlist",
+                            params = Innertube.SearchFilter.CommunityPlaylist.value,
+                        ),
+                        fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
+                    )?.getOrNull()
+                    plResult?.items?.forEach { pl ->
+                        val bId = pl.info?.endpoint?.browseId ?: return@forEach
+                        val name = pl.info.name ?: return@forEach
+                        playlists.add(
+                            YtHomePlaylist(
+                                browseId = bId,
+                                title = name,
+                                subtitle = pl.channel?.name ?: "YouTube Music",
+                                coverUrl = pl.thumbnail?.url,
+                            )
+                        )
+                    }
+                }
+            }
+
             // 3. Derive artists from recommended tracks if FEmusic_home didn't return artist cards
             if (artists.isEmpty()) {
                 tracks
