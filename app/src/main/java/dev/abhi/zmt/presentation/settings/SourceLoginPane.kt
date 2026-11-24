@@ -25,12 +25,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import android.annotation.SuppressLint
+import android.webkit.CookieManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.abhi.zmt.R
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.TuiKey
+import dev.abhi.zmt.data.remote.youtube.innertube.Innertube
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.presentation.player.DmtAction
 import dev.abhi.zmt.presentation.player.DmtState
@@ -44,7 +51,64 @@ import dev.abhi.zmt.ui.theme.TuiLine
 fun SourceLoginPane(mode: SourceMode, state: DmtState, dispatch: (DmtAction) -> Unit) {
     when (mode) {
         SourceMode.TELEGRAM -> TelegramLoginPane(state, dispatch)
+        SourceMode.YOUTUBE -> YoutubeWebViewLoginPane(state, dispatch)
         else -> JellyfinLoginPane(mode, dispatch)
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
+    var captured by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        ) {
+            Caption("youtube music sign in")
+            Spacer(modifier = Modifier.weight(1f))
+            TuiKey(
+                label = "[ cancel ]",
+                onClick = { dispatch(DmtAction.Show(DmtView.SOURCES)) },
+            )
+        }
+
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            factory = { ctx ->
+                CookieManager.getInstance().setAcceptCookie(true)
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            if (captured || url == null) return
+                            val cookies = CookieManager.getInstance().getCookie("https://youtube.com").orEmpty()
+                            val isLoggedIn = cookies.contains("SAPISID=") || cookies.contains("__Secure-3PAPISID=")
+                            if (url.startsWith("https://youtube.com") && isLoggedIn) {
+                                captured = true
+                                CookieManager.getInstance().flush()
+                                Innertube.cookie = cookies
+                                dispatch(
+                                    DmtAction.Config(
+                                        state.settings.copy(
+                                            sourceMode = SourceMode.YOUTUBE,
+                                            youtubeCookie = cookies,
+                                        )
+                                    )
+                                )
+                                dispatch(DmtAction.Show(DmtView.HOME))
+                            }
+                        }
+                    }
+                    loadUrl("https://google.com")
+                }
+            },
+        )
     }
 }
 
