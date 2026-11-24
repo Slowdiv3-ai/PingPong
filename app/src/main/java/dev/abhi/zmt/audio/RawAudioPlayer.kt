@@ -322,11 +322,11 @@ class RawAudioPlayer {
 
                             if (customModeIsLayered) {
                                 if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f, 1.0f, mainFilter)
-                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredFreqFilter)
+                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredTelFilter)
                                 if (customPresets.any { it.name.startsWith("FREQ_") }) {
                                     val freqPreset = customPresets.first { it.name.startsWith("FREQ_") }
                                     val oldPreset = currentPreset; currentPreset = freqPreset
-                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, layeredFreqFilter)
+                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredFreqFilter)
                                     currentPreset = oldPreset
                                 }
                                 if (customPresets.any { it.name.startsWith("TREMOLO_") }) {
