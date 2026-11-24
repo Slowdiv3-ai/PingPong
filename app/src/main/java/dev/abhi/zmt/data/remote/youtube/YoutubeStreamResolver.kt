@@ -24,13 +24,13 @@ private const val RETRY_DELAY_MS = 200L
  * Used by both [resolve] and [resolveAll].
  */
 private val INNERTUBE_CONTEXTS = listOf(
-    Context.DefaultVisionOS,
     Context.DefaultAndroidVR,
-    Context.DefaultWeb,
-    Context.DefaultAndroidMusic,
-    Context.DefaultIOS,
     Context.DefaultTV,
+    Context.DefaultIOS,
+    Context.DefaultAndroidMusic,
+    Context.DefaultWeb,
 )
+
 
 data class ResolvedStream(
     val url: String,
