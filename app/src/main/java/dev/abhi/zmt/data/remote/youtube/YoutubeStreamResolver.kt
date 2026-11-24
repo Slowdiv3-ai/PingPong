@@ -8,9 +8,18 @@ import dev.abhi.zmt.data.remote.youtube.innertube.models.Context
 import dev.abhi.zmt.data.remote.youtube.innertube.models.UserAgents
 import dev.abhi.zmt.data.remote.youtube.innertube.models.bodies.PlayerBody
 import dev.abhi.zmt.data.remote.youtube.innertube.requests.player
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +40,12 @@ private val INNERTUBE_CONTEXTS = listOf(
     Context.DefaultWeb,
 )
 
+private val PIPED_INSTANCES = listOf(
+    "https://kavin.rocks",
+    "https://adminforge.de",
+    "https://projectsegfau.lt",
+)
+
 
 data class ResolvedStream(
     val url: String,
@@ -46,22 +61,51 @@ class YoutubeStreamResolver @Inject constructor(
 ) {
 
     suspend fun resolve(videoId: String): ResolvedStream? {
-    // 1. Try fast InnerTube API first (~300ms)
-    for (context in INNERTUBE_CONTEXTS) {
-        if (!currentCoroutineContext().isActive) return null
-        val stream = resolveViaInnertubeContext(videoId, context)
-        if (stream != null) return stream
-        delay(RETRY_DELAY_MS)
+        for (context in INNERTUBE_CONTEXTS) {
+            if (!currentCoroutineContext().isActive) return null
+            val stream = resolveViaInnertubeContext(videoId, context)
+            if (stream != null) return stream
+            delay(RETRY_DELAY_MS)
+        }
+
+        val piped = resolveViaPiped(videoId)
+        if (piped != null) return piped
+
+        Log.e(TAG, "All resolvers failed for $videoId")
+        return null
     }
 
-    // 2. Fallback to Python yt-dlp only if InnerTube fails
-    Log.w(TAG, "InnerTube failed for $videoId, falling back to yt-dlp")
-    val ytdl = resolveViaYtDlp(videoId)
-    if (ytdl != null) return ytdl
+    private suspend fun resolveViaPiped(videoId: String): ResolvedStream? {
+        for (instance in PIPED_INSTANCES) {
+            if (!currentCoroutineContext().isActive) return null
+            try {
+                val raw = Innertube.baseClient.get("$instance/streams/$videoId").bodyAsText()
+                val root = Json.parseToJsonElement(raw).jsonObject
+                val audioStreams = root["audioStreams"]?.jsonArray ?: continue
 
-    Log.e(TAG, "All resolvers failed for $videoId")
-    return null
-}
+                val best = audioStreams
+                    .map { it.jsonObject }
+                    .filter { it["url"]?.jsonPrimitive?.contentOrNull != null }
+                    .maxByOrNull { it["bitrate"]?.jsonPrimitive?.intOrNull ?: 0 }
+                    ?: continue
+
+                val url = best["url"]!!.jsonPrimitive.content
+                val length = best["contentLength"]?.jsonPrimitive?.longOrNull ?: 0L
+
+                Log.d(TAG, "Piped($instance): resolved stream for $videoId")
+                return ResolvedStream(
+                    url = url,
+                    userAgent = UserAgents.DESKTOP,
+                    contentLength = length,
+                    resolverName = "Piped($instance)",
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Piped($instance) failed for $videoId: ${e.message}")
+            }
+        }
+        return null
+    }
+
 
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
         val results = mutableListOf<ResolvedStream>()
