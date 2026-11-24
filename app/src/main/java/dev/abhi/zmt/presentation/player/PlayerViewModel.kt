@@ -1135,6 +1135,7 @@ class PlayerViewModel @Inject constructor(
         currentState.settings.crossfadeDuration.seconds
 
     private var currentTrackHeaders: Map<String, String>? = null
+    private var resolveJob: Job? = null
 
     private fun playResolvedUri(
         uri: Uri,
@@ -1143,6 +1144,8 @@ class PlayerViewModel @Inject constructor(
         onError: (String) -> Unit,
         onSuccess: () -> Unit,
     ) {
+        resolveJob?.cancel()
+        currentTrackUri = uri
         val uriStr = uri.toString()
         if (uri.scheme != "youtube") {
             currentTrackUri = uri
@@ -1160,8 +1163,9 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // Resolve & cache YouTube audio to a local file so MediaExtractor + DSP work 100% natively
-        viewModelScope.launch {
+        // Cancel any previous download and stop old audio immediately while loading the new track
+        rawPlayer.stop()
+        resolveJob = viewModelScope.launch {
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
             val cachedFile = withContext(Dispatchers.IO) {
                 streamCache.downloadSync(
@@ -1171,12 +1175,13 @@ class PlayerViewModel @Inject constructor(
                     }
                 )
             }
+            // Ignore if user already skipped to another track while downloading
+            if (currentTrackUri != uri) return@launch
             if (cachedFile == null) {
                 Log.e("RawAudioPlayer", "Download/resolve failed for $videoId")
                 onError("Could not load YouTube stream for $videoId")
                 return@launch
             }
-            Log.d("RawAudioPlayer", "Playing cached stream for $videoId (${cachedFile.length()} bytes)")
             val fileUri = Uri.fromFile(cachedFile)
             currentTrackUri = fileUri
             currentTrackHeaders = null
@@ -1230,33 +1235,30 @@ class PlayerViewModel @Inject constructor(
             if (id != null && uri != null) {
                 val track = trackPathIndex[id]?.let { path -> currentState.tracks.find { it.path == path } }
                     ?: currentState.tracks.find { it.id.toString() == id }
-                
                 if (track != null) {
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
-
-                    val now = System.currentTimeMillis()
-                    val uriStr = uri.toString()
-                    if (uriStr == lastPlayUriString && now - lastPlayUriTime < 600L) {
-                        return
-                    }
-                    lastPlayUriString = uriStr
-                    lastPlayUriTime = now
-                    
-    
-                    val fadeSeconds = 0
-                    val startPos = if (shouldCrossfade) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
-                    
-                    playResolvedUri(uri, startPos, fadeSeconds,
-                        onError = { msg -> 
-                            android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
-                            controller?.volume = 1f
-                        },
-                        onSuccess = { 
-                            controller?.volume = 0f
-                        }
-                    )
-
                 }
+
+                val now = System.currentTimeMillis()
+                val uriStr = uri.toString()
+                if (uriStr == lastPlayUriString && now - lastPlayUriTime < 600L) {
+                    return
+                }
+                lastPlayUriString = uriStr
+                lastPlayUriTime = now
+
+                val fadeSeconds = 0
+                val startPos = if (shouldCrossfade) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
+
+                playResolvedUri(uri, startPos, fadeSeconds,
+                    onError = { msg ->
+                        android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
+                        controller?.volume = 1f
+                    },
+                    onSuccess = {
+                        controller?.volume = 0f
+                    }
+                )
             } else {
                 rawPlayer.stop()
             }
@@ -1610,7 +1612,28 @@ class PlayerViewModel @Inject constructor(
     private fun fetchOnlineLyrics() {
         val id = currentState.nowPlayingId ?: return
         if (currentState.lyricsFetching || currentState.lyrics != null) return
-        val track = currentState.tracks.find { it.id.toString() == id } ?: return
+        val track = currentState.tracks.find { it.id.toString() == id }
+            ?: currentState.currentTrack
+            ?: lookupCurrentTrack()
+            ?: controller?.currentMediaItem?.let { item ->
+                Track(
+                    id = id.toLongOrNull() ?: 0L,
+                    uri = item.localConfiguration?.uri ?: Uri.EMPTY,
+                    title = item.mediaMetadata.title?.toString().orEmpty(),
+                    artist = item.mediaMetadata.artist?.toString().orEmpty(),
+                    album = item.mediaMetadata.albumTitle?.toString().orEmpty(),
+                    path = item.localConfiguration?.uri?.toString().orEmpty(),
+                    durationMs = currentState.durationMs,
+                    mime = "audio/mpeg",
+                    bitrate = 0,
+                    size = 0L,
+                    trackNumber = 0,
+                    dateAdded = 0L,
+                    dateModified = 0L,
+                    source = TrackSource.YOUTUBE,
+                )
+            }
+            ?: return
 
         reduce { it.copy(lyricsFetching = true) }
         viewModelScope.launch {
@@ -1628,6 +1651,9 @@ class PlayerViewModel @Inject constructor(
                 notify(context.getString(R.string.no_lyrics_found))
                 return@launch
             }
+
+            // Skip file embedding for streamed YouTube tracks
+            if (track.source != TrackSource.LOCAL) return@launch
 
             val intentSender = embedLyrics.writeRequest(track)
             if (intentSender == null) {
