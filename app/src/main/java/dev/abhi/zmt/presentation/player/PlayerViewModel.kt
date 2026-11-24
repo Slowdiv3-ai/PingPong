@@ -160,6 +160,9 @@ class PlayerViewModel @Inject constructor(
             val settings = preferencesRepository.settings.first()
             dev.abhi.zmt.data.remote.youtube.innertube.Innertube.cookie = settings.youtubeCookie
             reduce { it.copy(settings = settings, settingsLoaded = true) }
+            if (settings.sourceMode == SourceMode.YOUTUBE) {
+                loadYoutubeHome()
+            }
         }
 
         viewModelScope.launch {
@@ -845,8 +848,14 @@ class PlayerViewModel @Inject constructor(
                         scan()
                     }
                 }
+                if (intent.settings.sourceMode == SourceMode.YOUTUBE &&
+                    (old.sourceMode != SourceMode.YOUTUBE || old.youtubeCookie != intent.settings.youtubeCookie || currentState.ytHome.tracks.isEmpty())
+                ) {
+                    loadYoutubeHome()
+                }
                 if (old.cols != intent.settings.cols) loadCover(c?.currentMediaItem)
             }
+
 
             is DmtAction.ShowLogin ->
                 reduce {
@@ -999,6 +1008,21 @@ class PlayerViewModel @Inject constructor(
             is DmtAction.PlaylistImported -> {
                 reduce { it.copy(notice = intent.message) }
             }
+            is DmtAction.RefreshYtHome -> loadYoutubeHome()
+            is DmtAction.PlayYtPlaylist -> {
+                notify("loading ${intent.title.lowercase()}...")
+                viewModelScope.launch {
+                    val tracks = withContext(Dispatchers.IO) {
+                        youtubeRepository.playlistTracks(intent.browseId)
+                    }
+                    if (tracks.isEmpty()) {
+                        notify("no playable tracks in playlist")
+                    } else {
+                        onIntent(DmtAction.PlayAt(tracks, 0))
+                    }
+                }
+            }
+
             is DmtAction.SetEqualizerPreset -> {
                 val c = controller ?: return@onIntent
                 c.sendCustomCommand(
@@ -1135,6 +1159,16 @@ class PlayerViewModel @Inject constructor(
 
     private fun getCrossfadeSeconds(): Int =
         currentState.settings.crossfadeDuration.seconds
+
+    private fun loadYoutubeHome() {
+        if (currentState.ytHomeLoading) return
+        reduce { it.copy(ytHomeLoading = true) }
+        viewModelScope.launch {
+            val feed = withContext(Dispatchers.IO) { youtubeRepository.homeFeed() }
+            reduce { it.copy(ytHome = feed, ytHomeLoading = false) }
+        }
+    }
+
 
     private fun loadYoutubeHome() {
         if (currentState.ytHomeLoading) return
