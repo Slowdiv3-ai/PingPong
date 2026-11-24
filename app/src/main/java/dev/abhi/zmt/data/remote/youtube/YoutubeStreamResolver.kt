@@ -46,19 +46,22 @@ class YoutubeStreamResolver @Inject constructor(
 ) {
 
     suspend fun resolve(videoId: String): ResolvedStream? {
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) return ytdl
-
-        for (context in INNERTUBE_CONTEXTS) {
-            if (!currentCoroutineContext().isActive) return null
-            val stream = resolveViaInnertubeContext(videoId, context)
-            if (stream != null) return stream
-            delay(RETRY_DELAY_MS)
-        }
-
-        Log.e(TAG, "All resolvers failed for $videoId")
-        return null
+    // 1. Try fast InnerTube API first (~300ms)
+    for (context in INNERTUBE_CONTEXTS) {
+        if (!currentCoroutineContext().isActive) return null
+        val stream = resolveViaInnertubeContext(videoId, context)
+        if (stream != null) return stream
+        delay(RETRY_DELAY_MS)
     }
+
+    // 2. Fallback to Python yt-dlp only if InnerTube fails
+    Log.w(TAG, "InnerTube failed for $videoId, falling back to yt-dlp")
+    val ytdl = resolveViaYtDlp(videoId)
+    if (ytdl != null) return ytdl
+
+    Log.e(TAG, "All resolvers failed for $videoId")
+    return null
+}
 
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
         val results = mutableListOf<ResolvedStream>()
