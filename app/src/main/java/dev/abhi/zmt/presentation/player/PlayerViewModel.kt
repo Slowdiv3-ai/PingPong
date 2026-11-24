@@ -158,8 +158,10 @@ class PlayerViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val settings = preferencesRepository.settings.first()
+            dev.abhi.zmt.data.remote.youtube.innertube.Innertube.cookie = settings.youtubeCookie
             reduce { it.copy(settings = settings, settingsLoaded = true) }
         }
+
         viewModelScope.launch {
             val initErr = telegramLogin.initialize()
             if (initErr != null) {
