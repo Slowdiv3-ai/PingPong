@@ -38,18 +38,19 @@ object Innertube {
     @Volatile
     var cookie: String? = null
 
-    private fun sapisidHash(cookieStr: String): String? {
-        val sapisid = cookieStr.split(";")
-            .map { it.trim() }
-            .firstOrNull { it.startsWith("SAPISID=") || it.startsWith("__Secure-3PAPISID=") }
-            ?.substringAfter("=")
-            ?.takeIf { it.isNotBlank() }
-            ?: return null
-        val timestamp = System.currentTimeMillis() / 1000L
-        val raw = "$timestamp $sapisid https://youtube.com"
-        val digest = java.security.MessageDigest.getInstance("SHA-1").digest(raw.toByteArray())
-        val hex = digest.joinToString("") { "%02x".format(it) }
-        return "SAPISIDHASH ${timestamp}_$hex"
+    private fun parseCookieMap(raw: String): Map<String, String> =
+        raw.split(";").mapNotNull { part ->
+            val idx = part.indexOf('=')
+            if (idx > 0) part.substring(0, idx).trim() to part.substring(idx + 1).trim() else null
+        }.toMap()
+
+    private fun sapisidHash(cookies: Map<String, String>): String? {
+        val sap = cookies["SAPISID"] ?: cookies["__Secure-3PAPISID"] ?: return null
+        val ts = System.currentTimeMillis() / 1000L
+        val hash = java.security.MessageDigest.getInstance("SHA-1")
+            .digest("$ts $sap https://youtube.com".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return "SAPISIDHASH ${ts}_$hash"
     }
 
     private val OriginInterceptor = createClientPlugin("OriginInterceptor") {
@@ -95,7 +96,7 @@ object Innertube {
     }
      val client = baseClient.config {
         defaultRequest {
-            url(scheme = "https", host = "://youtube.com") {
+            url(scheme = "https", host = "music" + "." + "youtube" + "." + "com") {
                 parameters {
                     set("prettyPrint", "false")
                     set("key", API_KEY)
