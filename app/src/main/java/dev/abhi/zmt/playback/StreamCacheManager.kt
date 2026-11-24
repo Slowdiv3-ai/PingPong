@@ -115,14 +115,21 @@ class StreamCacheManager @Inject constructor(
         val resolved = resolveUrl() ?: return null
         val (url, userAgent) = resolved
         val target = fileFor(streamUri)
-        val tmp = File(target.parent, target.name + ".tmp")
+        val tmp = File(target.parent, "${target.name}.${System.nanoTime()}.tmp")
         try {
             Log.d(TAG, "Download start: $streamUri")
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 120_000
             conn.setRequestProperty("User-Agent", userAgent)
+            conn.setRequestProperty("Accept", "*/*")
             conn.connect()
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                Log.w(TAG, "Download HTTP $code for $streamUri")
+                conn.disconnect()
+                return null
+            }
             val total = conn.contentLength
             val input = conn.inputStream
             FileOutputStream(tmp).use { out ->
@@ -137,7 +144,11 @@ class StreamCacheManager @Inject constructor(
             }
             conn.disconnect()
             if (tmp.length() > 0) {
-                tmp.renameTo(target)
+                if (!target.exists()) {
+                    tmp.renameTo(target)
+                } else {
+                    tmp.delete()
+                }
                 Log.d(TAG, "Download done: $streamUri (${target.length()} bytes)")
                 evictIfNeeded()
                 return target
@@ -150,6 +161,7 @@ class StreamCacheManager @Inject constructor(
             return null
         }
     }
+
 
     /** Compute a stable filename from the stream URI. */
     private fun fileFor(streamUri: String): File {
