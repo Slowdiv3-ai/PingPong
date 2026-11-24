@@ -134,8 +134,10 @@ fun SourcesPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
                 onLogout = if (supportsLogin && connected) {
                     {
                         if (source.mode == SourceMode.YOUTUBE) {
-                            dev.abhi.zmt.data.remote.youtube.innertube.Innertube.cookie = null
+                            Innertube.cookie = null
+                            android.webkit.CookieManager.getInstance().removeAllCookies(null)
                         }
+
                         dispatch(DmtAction.Config(source.logout(settings)))
                     }
                 } else {
