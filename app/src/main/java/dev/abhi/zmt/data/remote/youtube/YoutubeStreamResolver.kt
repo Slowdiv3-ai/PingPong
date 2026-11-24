@@ -218,10 +218,9 @@ class YoutubeStreamResolver @Inject constructor(
             val format = formats
                 .filter { it.mimeType.startsWith("audio/") }
                 .let { audioFormats ->
-                    audioFormats.find { it.url != null && it.itag == 251 }
-                        ?: audioFormats.find { it.url != null && it.itag == 140 }
+                    audioFormats.find { it.url != null && it.itag == 140 }
+                        ?: audioFormats.find { it.url != null && it.itag == 251 }
                         ?: audioFormats.find { it.url != null }
-                        ?: audioFormats.find { it.signatureCipher != null }
                 } ?: return null
 
             val url = format.url
