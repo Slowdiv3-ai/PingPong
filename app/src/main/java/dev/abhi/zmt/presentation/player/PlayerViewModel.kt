@@ -652,14 +652,36 @@ class PlayerViewModel @Inject constructor(
                 lastPlayUriString = ""
                 crossfadedForTrackId = null
                 rawPlayer.isExoPlaying = true
-                indexTracks(intent.list)
-                setMediaItems(
-                    intent.list.map { it.toMediaItem() },
-                    intent.index,
-                    0L,
-                )
-                prepare()
-                play()
+                val selected = intent.list.getOrNull(intent.index)
+                if (selected != null && selected.source == TrackSource.YOUTUBE && currentState.query.isNotBlank()) {
+                    indexTracks(listOf(selected))
+                    setMediaItems(listOf(selected.toMediaItem()), 0, 0L)
+                    prepare()
+                    play()
+                    val videoId = selected.remoteId ?: selected.uri.lastPathSegment
+                    if (!videoId.isNullOrBlank()) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val similar = youtubeRepository.radioFor(videoId)
+                            if (similar.isNotEmpty()) {
+                                indexTracks(similar)
+                                withContext(Dispatchers.Main) {
+                                    if (controller?.currentMediaItem?.mediaId == selected.id.toString()) {
+                                        controller?.addMediaItems(similar.map { it.toMediaItem() })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    indexTracks(intent.list)
+                    setMediaItems(
+                        intent.list.map { it.toMediaItem() },
+                        intent.index,
+                        0L,
+                    )
+                    prepare()
+                    play()
+                }
             }
 
             is DmtAction.Enqueue -> c?.run {
