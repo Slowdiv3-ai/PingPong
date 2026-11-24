@@ -59,8 +59,10 @@ data class ResolvedStream(
 class YoutubeStreamResolver @Inject constructor(
     private val youTubeDLBridge: YouTubeDLBridge,
 ) {
-
     suspend fun resolve(videoId: String): ResolvedStream? {
+        val ytdl = resolveViaYtDlp(videoId)
+        if (ytdl != null) return ytdl
+
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
             val stream = resolveViaInnertubeContext(videoId, context)
@@ -74,7 +76,6 @@ class YoutubeStreamResolver @Inject constructor(
         Log.e(TAG, "All resolvers failed for $videoId")
         return null
     }
-
     private suspend fun resolveViaPiped(videoId: String): ResolvedStream? {
         for (instance in PIPED_INSTANCES) {
             if (!currentCoroutineContext().isActive) return null
