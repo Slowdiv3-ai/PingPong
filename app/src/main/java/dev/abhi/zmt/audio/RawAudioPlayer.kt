@@ -175,10 +175,10 @@ class RawAudioPlayer {
                 if (mime.startsWith("audio/")) { audioTrackIndex = i; format = f; break }
             }
             if (audioTrackIndex == -1 || format == null) throw Exception("No audio track found")
-
             localExtractor.selectTrack(audioTrackIndex)
             val mime = format.getString(MediaFormat.KEY_MIME)!!
-            val actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
 
             if (startTimeMs > 0) {
                 localExtractor.seekTo(startTimeMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
@@ -188,12 +188,16 @@ class RawAudioPlayer {
             localCodec.configure(format, null, null, 0)
             localCodec.start()
 
-            val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            localAudioTrack = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(actualSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(minBufferSize * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
-            
+            fun buildAudioTrack(rate: Int): AudioTrack {
+                val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+                return AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                    .setBufferSizeInBytes(minBuf * 4).setTransferMode(AudioTrack.MODE_STREAM).build()
+            }
+
+            localAudioTrack = buildAudioTrack(actualSampleRate)
+
             if (!isOutgoing) {
                 currentAudioTrack = localAudioTrack
                 if (isExoPlaying) {
@@ -305,56 +309,86 @@ class RawAudioPlayer {
                 }
 
                 val outputBufferIndex = localCodec.dequeueOutputBuffer(bufferInfo, 10000)
-                if (outputBufferIndex >= 0) {
+                if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val outFmt = localCodec.outputFormat
+                    val newRate = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    channelCount = if (outFmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else channelCount
+                    if (newRate != actualSampleRate) {
+                        Log.d(TAG, "Sample rate changed: $actualSampleRate -> $newRate (channels=$channelCount)")
+                        actualSampleRate = newRate
+                        try { localAudioTrack?.stop(); localAudioTrack?.release() } catch (_: Exception) {}
+                        localAudioTrack = buildAudioTrack(actualSampleRate)
+                        if (!isOutgoing) {
+                            currentAudioTrack = localAudioTrack
+                            if (isExoPlaying) localAudioTrack?.play()
+                        } else {
+                            localAudioTrack?.play()
+                        }
+                    }
+                } else if (outputBufferIndex >= 0) {
                     val outputBuffer = localCodec.getOutputBuffer(outputBufferIndex)
                     if (bufferInfo.size > 0 && outputBuffer != null) {
-                        val bytes = ByteArray(bufferInfo.size)
-                        outputBuffer.get(bytes)
+                        val rawBytes = ByteArray(bufferInfo.size)
+                        outputBuffer.get(rawBytes)
+                        // If stream is mono (1 channel), duplicate each 16-bit sample to L+R stereo
+                        val bytes = if (channelCount == 1) {
+                            ByteArray(rawBytes.size * 2).also { stereo ->
+                                var src = 0; var dst = 0
+                                while (src < rawBytes.size - 1) {
+                                    stereo[dst] = rawBytes[src]; stereo[dst + 1] = rawBytes[src + 1]
+                                    stereo[dst + 2] = rawBytes[src]; stereo[dst + 3] = rawBytes[src + 1]
+                                    src += 2; dst += 4
+                                }
+                            }
+                        } else {
+                            rawBytes
+                        }
+                        val pcmSize = bytes.size
                         val lfoStep = 2.0f * PI.toFloat() * (lfoFreq / actualSampleRate)
 
                         if (!isOutgoing && outgoingMode != null && outgoingPreset != null && transitionProgress < 1.0f) {
                             val angle = transitionProgress * (PI.toFloat() / 2.0f)
                             val targetOutGain = cos(angle) * currentGain
                             val targetInGain = sin(angle) * currentGain
-                            val outBytes = bytes.copyOf(bufferInfo.size)
-                            applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, bufferInfo.size, actualSampleRate, lfoStep, lastOutGain, targetOutGain, outgoingFilter)
-                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, lastInGain, targetInGain, mainFilter)
-                            mixPcmBuffers(bytes, outBytes, bufferInfo.size)
+                            val outBytes = bytes.copyOf(pcmSize)
+                            applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, pcmSize, actualSampleRate, lfoStep, lastOutGain, targetOutGain, outgoingFilter)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, lastInGain, targetInGain, mainFilter)
+                            mixPcmBuffers(bytes, outBytes, pcmSize)
                             lastOutGain = targetOutGain
                             lastInGain = targetInGain
                         } else if (currentMode == PanMode.CUSTOM && customPresets.isNotEmpty()) {
 
                             if (customModeIsLayered) {
-                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, bufferInfo.size, lfoStep, 1.0f, 1.0f, mainFilter)
-                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredTelFilter)
+                                if (customPresets.any { it.name.startsWith("LOFI_") }) applyLoFi(bytes, pcmSize, lfoStep, 1.0f, 1.0f, mainFilter)
+                                if (customPresets.any { it.name.startsWith("TEL_") }) applyTelephone(bytes, pcmSize, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredTelFilter)
                                 if (customPresets.any { it.name.startsWith("FREQ_") }) {
                                     val freqPreset = customPresets.first { it.name.startsWith("FREQ_") }
                                     val oldPreset = currentPreset; currentPreset = freqPreset
-                                    applyFrequencyPan(bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredFreqFilter)
+                                    applyFrequencyPan(bytes, pcmSize, actualSampleRate, lfoStep, 1.0f, 1.0f, layeredFreqFilter)
                                     currentPreset = oldPreset
                                 }
                                 if (customPresets.any { it.name.startsWith("TREMOLO_") }) {
                                     val tremPreset = customPresets.first { it.name.startsWith("TREMOLO_") }
                                     val oldPreset = currentPreset; currentPreset = tremPreset
-                                    applyTremolo(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    applyTremolo(bytes, pcmSize, lfoStep, 1.0f)
                                     currentPreset = oldPreset
                                 } else if (customPresets.any { it.name.startsWith("VOL_") }) {
                                     val volPreset = customPresets.first { it.name.startsWith("VOL_") }
                                     val oldPreset = currentPreset; currentPreset = volPreset
-                                    applyVolumePan(bytes, bufferInfo.size, lfoStep, 1.0f)
+                                    applyVolumePan(bytes, pcmSize, lfoStep, 1.0f)
                                     currentPreset = oldPreset
                                 }
                             } else {
-                                applySinglePreset(currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, 1.0f, 1.0f, mainFilter)
+                                applySinglePreset(currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, 1.0f, 1.0f, mainFilter)
                             }
-                            if (currentGain < 1.0f) applyFade(bytes, bufferInfo.size, currentGain)
+                            if (currentGain < 1.0f) applyFade(bytes, pcmSize, currentGain)
                         } else {
-                            applyModeAndPreset(currentMode, currentPreset, bytes, bufferInfo.size, actualSampleRate, lfoStep, currentGain, currentGain, mainFilter)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, currentGain, currentGain, mainFilter)
                         }
 
 
                         // Advance LFO exactly ONCE per buffer
-                        lfoPhase += (bufferInfo.size / 4) * lfoStep
+                        lfoPhase += (pcmSize / 4) * lfoStep
                         while (lfoPhase > 2.0f * PI.toFloat()) lfoPhase -= 2.0f * PI.toFloat()
 
                         if (!isOutgoing) {
@@ -365,7 +399,7 @@ class RawAudioPlayer {
                             }
                         }
 
-                        localAudioTrack?.write(bytes, 0, bufferInfo.size, AudioTrack.WRITE_BLOCKING)
+                        localAudioTrack?.write(bytes, 0, pcmSize, AudioTrack.WRITE_BLOCKING)
 
                     }
                     localCodec.releaseOutputBuffer(outputBufferIndex, false)
