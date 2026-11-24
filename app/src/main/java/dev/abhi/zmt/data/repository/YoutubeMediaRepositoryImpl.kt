@@ -3,7 +3,10 @@ package dev.abhi.zmt.data.repository
 import android.net.Uri
 import android.util.Log
 import dev.abhi.zmt.data.remote.youtube.innertube.Innertube
+import dev.abhi.zmt.data.remote.youtube.innertube.models.bodies.NextBody
 import dev.abhi.zmt.data.remote.youtube.innertube.models.bodies.SearchBody
+import dev.abhi.zmt.data.remote.youtube.innertube.requests.discoverPage
+import dev.abhi.zmt.data.remote.youtube.innertube.requests.nextPage
 import dev.abhi.zmt.data.remote.youtube.innertube.requests.searchPage
 import dev.abhi.zmt.data.remote.youtube.innertube.utils.from
 import dev.abhi.zmt.domain.model.Track
@@ -59,6 +62,53 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
             Log.e(TAG, "Search failed for '$query': ${e.message}")
             emptyList()
         }
+    }
+
+    /** Fetches similar/radio tracks for a YouTube videoId using Innertube automix. */
+    suspend fun radioFor(videoId: String): List<Track> {
+        return try {
+            val next = Innertube.nextPage(NextBody(videoId = videoId))?.getOrNull()
+            val items = next?.itemsPage?.items.orEmpty()
+            items
+                .mapNotNull { it.toTrack() }
+                .filter { it.remoteId != videoId }
+        } catch (e: Exception) {
+            Log.e(TAG, "Radio fetch failed for '$videoId': ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Fetches trending/explore songs for the YouTube Home feed. */
+    suspend fun trendingSongs(): List<Track> {
+        return try {
+            val page = Innertube.discoverPage()?.getOrNull()
+            page?.trending?.songs?.mapNotNull { it.toTrack() }.orEmpty()
+        } catch (e: Exception) {
+            Log.e(TAG, "Discover fetch failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun Innertube.SongItem.toTrack(): Track? {
+        val videoId = info?.endpoint?.videoId ?: return null
+        return Track(
+            id = videoId.hashCode().toLong(),
+            uri = Uri.parse("youtube://video/$videoId"),
+            title = info.name ?: "Unknown",
+            artist = authors?.firstOrNull()?.name ?: "Unknown Artist",
+            album = album?.name ?: "YouTube",
+            path = "youtube://video/$videoId",
+            durationMs = durationText?.let { parseDuration(it) } ?: 0L,
+            mime = "audio/mpeg",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = System.currentTimeMillis(),
+            dateModified = System.currentTimeMillis(),
+            coverUri = thumbnail?.hd()?.let { Uri.parse(it) },
+            source = TrackSource.YOUTUBE,
+            remoteId = videoId,
+        )
     }
 
     override suspend fun scan(): List<Track> =
