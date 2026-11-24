@@ -33,11 +33,15 @@ import dev.abhi.zmt.R
 import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.tuiClickable
+import androidx.compose.runtime.LaunchedEffect
+import dev.abhi.zmt.data.repository.YtHomePlaylist
 import dev.abhi.zmt.domain.model.Album
 import dev.abhi.zmt.domain.model.Playlist
 import dev.abhi.zmt.domain.model.Artist
+import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Track
 import dev.abhi.zmt.domain.model.asCredit
+import dev.abhi.zmt.presentation.player.DmtView
 import dev.abhi.zmt.presentation.library.artistLine2
 import dev.abhi.zmt.presentation.player.DmtAction
 import dev.abhi.zmt.presentation.player.DmtState
@@ -75,6 +79,16 @@ fun HomePane(
         }
         return
     }
+    if (state.settings.sourceMode == SourceMode.YOUTUBE) {
+        LaunchedEffect(state.settings.youtubeCookie) {
+            if (state.ytHome.tracks.isEmpty() && !state.ytHomeLoading) {
+                dispatch(DmtAction.RefreshYtHome)
+            }
+        }
+        YoutubeHomeSection(state = state, dispatch = dispatch, art = art)
+        return
+    }
+
     if (state.tracks.isEmpty()) {
         Box(
             contentAlignment = Alignment.Center,
@@ -90,6 +104,7 @@ fun HomePane(
         }
         return
     }
+
 
     val home = state.home
 
@@ -356,3 +371,155 @@ private fun ShelfCard(
         )
     }
 }
+
+@Composable
+private fun YoutubeHomeSection(
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    art: suspend (Track) -> Bitmap,
+) {
+    val ytHome = state.ytHome
+
+    if (state.ytHomeLoading && ytHome.tracks.isEmpty() && ytHome.playlists.isEmpty()) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 48.dp),
+        ) {
+            Text(
+                text = "loading youtube music feed...",
+                style = MaterialTheme.typography.bodyLarge,
+                color = TuiDim,
+            )
+        }
+        return
+    }
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        Text(
+            text = if (!state.settings.youtubeCookie.isNullOrBlank()) "for you" else "discover",
+            style = MaterialTheme.typography.titleLarge,
+            color = TuiBright,
+            modifier = Modifier.padding(top = 14.dp, bottom = 4.dp),
+        )
+
+        if (ytHome.playlists.isNotEmpty()) {
+            ShelfHeader(label = "playlists & mixes") {
+                dispatch(DmtAction.Show(DmtView.LIBRARY))
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(ytHome.playlists, key = { it.browseId }) { pl ->
+                    YtPlaylistCard(playlist = pl) {
+                        dispatch(DmtAction.PlayYtPlaylist(pl.browseId, pl.title))
+                    }
+                }
+            }
+        }
+
+        if (ytHome.tracks.isNotEmpty()) {
+            ShelfHeader(label = "recommended tracks") {
+                dispatch(DmtAction.Show(DmtView.LIBRARY))
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(ytHome.tracks, key = { _, track -> track.id }) { index, track ->
+                    TrackCard(track = track, art = art, artKey = state.settings.rawArt) {
+                        dispatch(DmtAction.PlayAt(ytHome.tracks, index))
+                    }
+                }
+            }
+        }
+
+        if (ytHome.artists.isNotEmpty()) {
+            ShelfHeader(label = "artists") {
+                dispatch(DmtAction.Show(DmtView.LIBRARY))
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(ytHome.artists, key = { it.name }) { artist ->
+                    Column(
+                        modifier = Modifier
+                            .width(136.dp)
+                            .border(1.dp, TuiLine)
+                            .tuiClickable {
+                                dispatch(DmtAction.Query(artist.name))
+                                dispatch(DmtAction.Show(DmtView.LIBRARY))
+                                dispatch(DmtAction.Search)
+                            }
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            text = artist.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TuiBright,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "tap to explore",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TuiDim,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        if (state.home.recentlyPlayed.isNotEmpty()) {
+            HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 18.dp))
+            Text(
+                text = stringResource(R.string.home_recently_played),
+                style = MaterialTheme.typography.titleLarge,
+                color = TuiBright,
+                modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(state.home.recentlyPlayed, key = { _, track -> track.id }) { index, track ->
+                    TrackCard(track = track, art = art, artKey = state.settings.rawArt) {
+                        dispatch(DmtAction.PlayAt(state.home.recentlyPlayed, index))
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun YtPlaylistCard(
+    playlist: YtHomePlaylist,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(148.dp)
+            .border(1.dp, TuiLine)
+            .background(TuiRaised)
+            .tuiClickable(onClick)
+            .padding(10.dp),
+    ) {
+        Text(
+            text = "[ playlist ]",
+            style = MaterialTheme.typography.labelSmall,
+            color = TuiDim,
+        )
+        Spacer(modifier = Modifier.height(18.dp))
+        Text(
+            text = playlist.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TuiBright,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = playlist.subtitle.lowercase().ifBlank { "youtube music" },
+            style = MaterialTheme.typography.labelSmall,
+            color = TuiDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
