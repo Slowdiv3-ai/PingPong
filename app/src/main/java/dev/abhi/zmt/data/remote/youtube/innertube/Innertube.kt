@@ -99,7 +99,7 @@ object Innertube {
                 contentType(ContentType.Application.Json)
                 headers {
                     set("X-Goog-Api-Key", API_KEY)
-                    cookie?.takeIf { it.isNotBlank() }?.let { rawCookie ->
+                    cookie?.takeIf { it.contains("SID=") && (it.contains("SAPISID=") || it.contains("__Secure-3PAPISID=")) }?.let { rawCookie ->
                         set("Cookie", rawCookie)
                         sapisidHash(rawCookie)?.let { auth ->
                             set("Authorization", auth)
