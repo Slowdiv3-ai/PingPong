@@ -35,6 +35,23 @@ internal val json = Json {
 }
 
 object Innertube {
+    @Volatile
+    var cookie: String? = null
+
+    private fun sapisidHash(cookieStr: String): String? {
+        val sapisid = cookieStr.split(";")
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("SAPISID=") || it.startsWith("__Secure-3PAPISID=") }
+            ?.substringAfter("=")
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val timestamp = System.currentTimeMillis() / 1000L
+        val raw = "$timestamp $sapisid https://youtube.com"
+        val digest = java.security.MessageDigest.getInstance("SHA-1").digest(raw.toByteArray())
+        val hex = digest.joinToString("") { "%02x".format(it) }
+        return "SAPISIDHASH ${timestamp}_$hex"
+    }
+
     private val OriginInterceptor = createClientPlugin("OriginInterceptor") {
         client.sendPipeline.intercept(HttpSendPipeline.State) {
             context.headers {
@@ -78,10 +95,17 @@ object Innertube {
     }
     val client = baseClient.config {
         defaultRequest {
-            url(scheme = "https", host = "music.youtube.com") {
+            url(scheme = "https", host = "://youtube.com") {
                 contentType(ContentType.Application.Json)
                 headers {
                     set("X-Goog-Api-Key", API_KEY)
+                    cookie?.takeIf { it.isNotBlank() }?.let { rawCookie ->
+                        set("Cookie", rawCookie)
+                        sapisidHash(rawCookie)?.let { auth ->
+                            set("Authorization", auth)
+                            set("X-Goog-AuthUser", "0")
+                        }
+                    }
                 }
                 parameters {
                     set("prettyPrint", "false")
