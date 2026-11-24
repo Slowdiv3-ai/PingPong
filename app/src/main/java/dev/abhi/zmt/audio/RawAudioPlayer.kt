@@ -89,17 +89,17 @@ class RawAudioPlayer {
         lfoPhase = 0.0f
     }
 
-
     @Synchronized
     fun playUri(
         context: Context, 
         uri: Uri, 
         startTimeMs: Long = 0, 
-        crossfadeSeconds: Int = 0, 
+        crossfadeSeconds: Int = 0,
+        headers: Map<String, String>? = null,
         onError: (String) -> Unit, 
         onSuccess: () -> Unit
     ) {
-        Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds")
+        Log.d(TAG, "▶ playUri CALLED: crossfade = $crossfadeSeconds, uri = $uri")
         
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
         val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
@@ -113,7 +113,7 @@ class RawAudioPlayer {
             
             playbackThread = Thread {
                 try {
-                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs, onError, onSuccess)
+                    decodeAndPlay(context, uri, startTimeMs, fadeInStartMs, fadeDurationMs, headers, onError, onSuccess)
                 } catch (e: InterruptedException) { } catch (e: Exception) {
                     Handler(Looper.getMainLooper()).post { onError(e.toString()) }
                 }
@@ -131,15 +131,17 @@ class RawAudioPlayer {
             currentAudioTrack = null
 
             playbackThread = Thread {
-                decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, onError, onSuccess)
+                decodeAndPlay(context, uri, startTimeMs, System.currentTimeMillis(), if (crossfadeSeconds > 0) fadeDurationMs else 0, headers, onError, onSuccess)
             }
             playbackThread?.start()
         }
     }
 
+    
     private fun decodeAndPlay(
         context: Context, uri: Uri, startTimeMs: Long, 
         fadeInStartMs: Long, fadeInDurationMs: Long,
+        headers: Map<String, String>? = null,
         onError: (String) -> Unit, onSuccess: () -> Unit
     ) {
         // Ensure a clean slate for every new track
@@ -159,8 +161,10 @@ class RawAudioPlayer {
                     val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                     localExtractor.setDataSource(fd.fileDescriptor)
                 } else throw Exception("File not found")
+            } else if (uri.scheme == "http" || uri.scheme == "https") {
+                localExtractor.setDataSource(uri.toString(), headers)
             } else {
-                localExtractor.setDataSource(context, uri, null)
+                localExtractor.setDataSource(context, uri, headers)
             }
 
             var audioTrackIndex = -1
