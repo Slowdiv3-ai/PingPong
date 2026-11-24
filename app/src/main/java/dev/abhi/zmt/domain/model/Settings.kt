@@ -101,6 +101,7 @@ data class DmtSettings(
     val telegramChannelId: Long? = null,
     val telegramChannelName: String? = null,
     val telegramAuthState: String? = null,
+    val youtubeCookie: String? = null,
     val crossfadeDuration: CrossfadeDuration = CrossfadeDuration.OFF,
     val sleepFade: SleepFade = SleepFade.OFF,
     val equalizerPreset: Int = -1,
