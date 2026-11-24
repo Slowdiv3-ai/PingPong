@@ -53,10 +53,25 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
                 query = query,
                 params = Innertube.SearchFilter.Song.value,
             )
-            val result: Innertube.ItemsPage<Innertube.SongItem>? = Innertube.searchPage(
+            var result: Innertube.ItemsPage<Innertube.SongItem>? = Innertube.searchPage(
                 body = body,
                 fromMusicShelfRendererContent = Innertube.SongItem.Companion::from,
-            )?.getOrNull()
+            )?.onFailure { err ->
+                Log.e(TAG, "searchPage error for '$query': ${err.message}", err)
+            }?.getOrNull()
+
+            if (result?.items.isNullOrEmpty() && Innertube.cookie != null) {
+                val saved = Innertube.cookie
+                Innertube.cookie = null
+                result = Innertube.searchPage(
+                    body = body,
+                    fromMusicShelfRendererContent = Innertube.SongItem.Companion::from,
+                )?.onFailure { err ->
+                    Log.e(TAG, "searchPage retry error for '$query': ${err.message}", err)
+                }?.getOrNull()
+                Innertube.cookie = saved
+            }
+
 
             val songs = result?.items
             Log.d(TAG, "Found ${songs?.size ?: 0} results for '$query'")
