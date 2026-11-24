@@ -70,7 +70,9 @@ private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Un
         val combined = listOf(ytmCookies, ytCookies)
             .filter { it.isNotBlank() }
             .joinToString("; ")
-        val isLoggedIn = combined.contains("SAPISID=") || combined.contains("__Secure-3PAPISID=")
+        val hasSapisid = combined.contains("SAPISID=") || combined.contains("__Secure-3PAPISID=")
+        val hasSid = combined.contains("SID=")
+        val isLoggedIn = hasSapisid && hasSid
         if (isLoggedIn) {
             captured = true
             cm.flush()
