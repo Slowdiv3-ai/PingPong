@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
@@ -14,18 +15,12 @@ import javax.inject.Singleton
 
 private val CACHED_SCHEMES = setOf("http", "https", "tg", "youtube")
 
-/**
- * Routes streamable sources through the [PlaybackCache] while leaving local
- * content:// reads untouched (no point copying device files into the cache).
- *
- * Falls back to the plain upstream chain when the cache cannot be initialised,
- * so playback behaviour never changes.
- */
 @OptIn(UnstableApi::class)
 @Singleton
 class OfflineCacheDataSourceFactory @Inject constructor(
     private val upstream: CompositeDataSource.Factory,
     private val playbackCache: PlaybackCache,
+    private val streamCache: StreamCacheManager,
 ) : DataSource.Factory {
 
     private val cacheFactory: DataSource.Factory? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -45,6 +40,7 @@ class OfflineCacheDataSourceFactory @Inject constructor(
         return SelectiveCacheDataSource(
             upstream = upstreamDataSource,
             cachedFactory = cacheFactory,
+            streamCache = streamCache,
         )
     }
 }
@@ -53,6 +49,7 @@ class OfflineCacheDataSourceFactory @Inject constructor(
 private class SelectiveCacheDataSource(
     private val upstream: DataSource,
     private val cachedFactory: DataSource.Factory?,
+    private val streamCache: StreamCacheManager,
 ) : DataSource {
 
     private val listeners = mutableListOf<TransferListener>()
@@ -64,6 +61,14 @@ private class SelectiveCacheDataSource(
     }
 
     override fun open(dataSpec: DataSpec): Long {
+        val localCached = streamCache.cachedFileFor(dataSpec.uri.toString())
+        if (localCached != null) {
+            val fileDs = FileDataSource()
+            listeners.forEach { fileDs.addTransferListener(it) }
+            active = fileDs
+            return active.open(dataSpec.buildUpon().setUri(Uri.fromFile(localCached)).build())
+        }
+
         val factory = cachedFactory
         active = if (factory != null && dataSpec.uri.scheme in CACHED_SCHEMES) {
             factory.createDataSource().also { cached ->
