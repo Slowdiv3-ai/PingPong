@@ -60,20 +60,18 @@ fun SourceLoginPane(mode: SourceMode, state: DmtState, dispatch: (DmtAction) -> 
 @Composable
 private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
     var captured by remember { mutableStateOf(false) }
-    var redirectedToYtm by remember { mutableStateOf(false) }
 
     fun tryCaptureCookies(): Boolean {
         if (captured) return true
         val cm = CookieManager.getInstance()
-        val ytmCookies = cm.getCookie("https://youtube.com").orEmpty()
-        val ytCookies = cm.getCookie("https://youtube.com").orEmpty()
+        val ytmCookies = cm.getCookie("https://music.youtube.com").orEmpty()
+        val ytCookies = cm.getCookie("https://www.youtube.com").orEmpty()
         val combined = listOf(ytmCookies, ytCookies)
             .filter { it.isNotBlank() }
             .joinToString("; ")
         val hasSapisid = combined.contains("SAPISID=") || combined.contains("__Secure-3PAPISID=")
         val hasSid = combined.contains("SID=")
-        val isLoggedIn = hasSapisid && hasSid
-        if (isLoggedIn) {
+        if (hasSapisid && hasSid) {
             captured = true
             cm.flush()
             Innertube.cookie = combined
@@ -127,25 +125,18 @@ private fun YoutubeWebViewLoginPane(state: DmtState, dispatch: (DmtAction) -> Un
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             if (captured || url == null) return
-
-                            // If Google finished sign-in on myaccount/accounts but stayed there, force-navigate to ://youtube.com
-                            if (!redirectedToYtm && (url.startsWith("https://google.com") || url.contains("://google.com"))) {
-                                redirectedToYtm = true
-                                view?.loadUrl("https://youtube.com")
-                                return
-                            }
-
-                            if (url.startsWith("https://youtube.com") || url.startsWith("https://youtube.com")) {
+                            if (url.startsWith("https://music.youtube.com") || url.startsWith("https://www.youtube.com")) {
                                 tryCaptureCookies()
                             }
                         }
                     }
-                    loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2F://youtube.com")
+                    loadUrl("https://music.youtube.com")
                 }
             },
         )
     }
 }
+
 
 
 @Composable
