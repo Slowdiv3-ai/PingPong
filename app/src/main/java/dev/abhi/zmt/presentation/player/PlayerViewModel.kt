@@ -1053,11 +1053,10 @@ class PlayerViewModel @Inject constructor(
                         crossfadedForTrackId = currentId
                         val nextItem = c.getMediaItemAt(c.nextMediaItemIndex)
                         val nextUri = nextItem.localConfiguration?.uri
-                            if (nextUri != null) {
+                        if (nextUri != null) {
                             lastPlayUriString = nextUri.toString()
                             lastPlayUriTime = System.currentTimeMillis()
-                            rawPlayer.playUri(
-                                context,
+                            playResolvedUri(
                                 nextUri,
                                 0L,
                                 fadeSec,
@@ -1113,6 +1112,47 @@ class PlayerViewModel @Inject constructor(
     private fun getCrossfadeSeconds(): Int =
         currentState.settings.crossfadeDuration.seconds
 
+    private var currentTrackHeaders: Map<String, String>? = null
+
+    private fun playResolvedUri(
+        uri: Uri,
+        startTimeMs: Long,
+        crossfadeSeconds: Int,
+        onError: (String) -> Unit,
+        onSuccess: () -> Unit,
+    ) {
+        val uriStr = uri.toString()
+        if (uri.scheme != "youtube") {
+            currentTrackUri = uri
+            currentTrackHeaders = null
+            rawPlayer.playUri(context, uri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
+            return
+        }
+
+        // Check if already cached locally first
+        streamCache.cachedFileFor(uriStr)?.let { cachedFile ->
+            val fileUri = Uri.fromFile(cachedFile)
+            currentTrackUri = fileUri
+            currentTrackHeaders = null
+            rawPlayer.playUri(context, fileUri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
+            return
+        }
+
+        // Resolve YouTube stream URL + User-Agent on IO thread, then feed to RawAudioPlayer
+        viewModelScope.launch {
+            val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
+            val resolved = withContext(Dispatchers.IO) { youtubeStreamResolver.resolve(videoId) }
+            if (resolved == null) {
+                onError("Could not resolve YouTube stream for $videoId")
+                return@launch
+            }
+            val resolvedUri = Uri.parse(resolved.url)
+            val headers = mapOf("User-Agent" to resolved.userAgent)
+            currentTrackUri = resolvedUri
+            currentTrackHeaders = headers
+            rawPlayer.playUri(context, resolvedUri, startTimeMs, crossfadeSeconds, headers, onError, onSuccess)
+        }
+    }
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -1159,11 +1199,10 @@ class PlayerViewModel @Inject constructor(
                     lastPlayUriTime = now
                     
     
-                    
                     val fadeSeconds = 0
                     val startPos = if (shouldCrossfade) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
                     
-                    rawPlayer.playUri(context, uri, startPos, fadeSeconds,
+                    playResolvedUri(uri, startPos, fadeSeconds,
                         onError = { msg -> 
                             android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
                             controller?.volume = 1f
@@ -1230,7 +1269,7 @@ class PlayerViewModel @Inject constructor(
                     lastPlayUriString = uriStr
                     lastPlayUriTime = now
 
-                    rawPlayer.playUri(context, uri, newPosition.positionMs, 0,
+                    rawPlayer.playUri(context, uri, newPosition.positionMs, 0, currentTrackHeaders,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: " + msg) },
                         onSuccess = { }
                     )
