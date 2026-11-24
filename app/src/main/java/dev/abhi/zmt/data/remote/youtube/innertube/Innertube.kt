@@ -93,7 +93,7 @@ object Innertube {
 
         install(OriginInterceptor)
     }
-    val client = baseClient.config {
+     val client = baseClient.config {
         defaultRequest {
             url(scheme = "https", host = "://youtube.com") {
                 parameters {
@@ -104,20 +104,25 @@ object Innertube {
             contentType(ContentType.Application.Json)
             headers {
                 set("X-Goog-Api-Key", API_KEY)
-                cookie?.takeIf { it.isNotBlank() }?.let { rawCookie ->
+                val rawCookie = cookie
+                if (!rawCookie.isNullOrBlank()) {
                     val map = parseCookieMap(rawCookie)
                     val auth = sapisidHash(map)
                     if (auth != null && map.containsKey("SID")) {
-                        val cleanCookie = map.entries.joinToString("; ") { "${it.key}=${it.value}" }
+                        val cleanCookie = map.entries.joinToString("; ") { entry -> "${entry.key}=${entry.value}" }
                         set("Cookie", cleanCookie)
                         set("Authorization", auth)
                         set("X-Goog-AuthUser", "0")
-                        map["VISITOR_INFO1_LIVE"]?.let { set("X-Goog-Visitor-Id", it) }
+                        val visitorId = map["VISITOR_INFO1_LIVE"]
+                        if (!visitorId.isNullOrBlank()) {
+                            set("X-Goog-Visitor-Id", visitorId)
+                        }
                     }
                 }
             }
         }
     }
+  
 
 
     private const val API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
