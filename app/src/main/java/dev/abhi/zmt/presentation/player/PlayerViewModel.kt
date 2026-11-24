@@ -1170,16 +1170,6 @@ class PlayerViewModel @Inject constructor(
     }
 
 
-    private fun loadYoutubeHome() {
-        if (currentState.ytHomeLoading) return
-        reduce { it.copy(ytHomeLoading = true) }
-        viewModelScope.launch {
-            val feed = withContext(Dispatchers.IO) { youtubeRepository.homeFeed() }
-            reduce { it.copy(ytHome = feed, ytHomeLoading = false) }
-        }
-    }
-
-
     private var currentTrackHeaders: Map<String, String>? = null
     private var resolveJob: Job? = null
 
