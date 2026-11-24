@@ -1290,8 +1290,7 @@ class PlayerViewModel @Inject constructor(
                     }
                     lastPlayUriString = uriStr
                     lastPlayUriTime = now
-
-                    rawPlayer.playUri(context, uri, newPosition.positionMs, 0, currentTrackHeaders,
+                    playResolvedUri(uri, newPosition.positionMs, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: " + msg) },
                         onSuccess = { }
                     )
@@ -1568,8 +1567,7 @@ class PlayerViewModel @Inject constructor(
             if (track != null) {
                 lastPlayUriString = track.uri.toString()
                 lastPlayUriTime = System.currentTimeMillis()
-                rawPlayer.playUri(
-                    context,
+                playResolvedUri(
                     track.uri,
                     position,
                     0,
