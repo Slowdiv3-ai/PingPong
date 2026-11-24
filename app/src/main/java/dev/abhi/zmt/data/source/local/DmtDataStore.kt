@@ -35,6 +35,7 @@ val KEY_JELLYFIN_TOKEN = stringPreferencesKey("jellyfin_token")
 val KEY_TELEGRAM_CHANNEL_ID = longPreferencesKey("telegram_channel_id")
 val KEY_TELEGRAM_CHANNEL_NAME = stringPreferencesKey("telegram_channel_name")
 val KEY_TELEGRAM_AUTH_STATE = stringPreferencesKey("telegram_auth_state")
+val KEY_YOUTUBE_COOKIE = stringPreferencesKey("youtube_cookie")
 val KEY_THEME = stringPreferencesKey("theme")
 
 val KEY_CROSSFADE = intPreferencesKey("crossfade_duration")
