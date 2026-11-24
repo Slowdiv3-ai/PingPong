@@ -12,6 +12,7 @@ import dev.abhi.zmt.domain.model.Genre
 import dev.abhi.zmt.domain.model.HomeShelves
 import dev.abhi.zmt.lyrics.Lyrics
 import dev.abhi.zmt.domain.model.Playlist
+import dev.abhi.zmt.data.repository.YtHomeFeed
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Spec
 import dev.abhi.zmt.domain.model.Track
@@ -73,6 +74,8 @@ data class DmtState(
     val settings: DmtSettings = DmtSettings(),
     val stats: DmtStats = DmtStats(),
     val home: HomeShelves = HomeShelves(),
+    val ytHome: YtHomeFeed = YtHomeFeed(),
+    val ytHomeLoading: Boolean = false,
     val tech: List<Spec> = emptyList(),
     val route: List<Spec> = emptyList(),
     val fault: String? = null,
@@ -168,6 +171,8 @@ sealed interface DmtAction {
     data object DismissImportDialog : DmtAction
     data class ImportPlaylistFromUrl(val url: String) : DmtAction
     data class PlaylistImported(val message: String) : DmtAction
+    data class PlayYtPlaylist(val browseId: String, val title: String) : DmtAction
+    data object RefreshYtHome : DmtAction
 }
 
 data class QueueRemoval(val index: Int, val label: String)
