@@ -11,9 +11,15 @@ import dev.abhi.zmt.data.remote.youtube.innertube.requests.discoverPage
 import dev.abhi.zmt.data.remote.youtube.innertube.requests.nextPage
 import dev.abhi.zmt.data.remote.youtube.innertube.requests.playlistPage
 import dev.abhi.zmt.data.remote.youtube.innertube.requests.searchPage
+import dev.abhi.zmt.data.remote.youtube.innertube.utils.from
+import dev.abhi.zmt.domain.model.Track
+import dev.abhi.zmt.domain.model.TrackSource
+import dev.abhi.zmt.domain.repository.MediaRepository
 import io.ktor.client.call.body
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import javax.inject.Inject
+import javax.inject.Singleton
 
 data class YtHomePlaylist(
     val browseId: String,
@@ -33,12 +39,6 @@ data class YtHomeFeed(
     val tracks: List<Track> = emptyList(),
     val artists: List<YtHomeArtist> = emptyList(),
 )
-import dev.abhi.zmt.data.remote.youtube.innertube.utils.from
-import dev.abhi.zmt.domain.model.Track
-import dev.abhi.zmt.domain.model.TrackSource
-import dev.abhi.zmt.domain.repository.MediaRepository
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private const val TAG = "YoutubeMediaRepo"
 
