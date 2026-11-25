@@ -86,6 +86,7 @@ class StreamExtensionEngine @Inject constructor(
         title: String?,
         artist: String?,
     ): ResolvedStream? = coroutineScope {
+        Log.d(TAG, "🏁 Racing extensions for id=$videoId title='$title' artist='$artist'")
         val candidates = buildList {
             if (!title.isNullOrBlank()) {
                 add(async { resolveViaJioSaavn(title, artist) })
