@@ -33,12 +33,11 @@ private const val RETRY_DELAY_MS = 200L
  * Used by both [resolve] and [resolveAll].
  */
 private val INNERTUBE_CONTEXTS = listOf(
-    Context.DefaultAndroidVR,
-    Context.DefaultTV,
-    Context.DefaultIOS,
     Context.DefaultAndroidMusic,
+    Context.DefaultTV,
     Context.DefaultWeb,
 )
+
 
 private val PIPED_INSTANCES = listOf(
     "https://kavin.rocks",
@@ -72,6 +71,10 @@ class YoutubeStreamResolver @Inject constructor(
 
     fun cacheStream(videoId: String, stream: ResolvedStream) {
         urlCache[videoId] = System.currentTimeMillis() to stream
+    }
+
+    fun invalidateCache(videoId: String) {
+        urlCache.remove(videoId)
     }
 
     suspend fun resolveViaInnertubeFast(videoId: String): ResolvedStream? {
