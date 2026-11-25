@@ -307,7 +307,12 @@ fun YtArtistDetailPane(
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(artist.albums, key = { it.browseId }) { album ->
-                        YtCollectionCard(item = album, tag = "[ album ]") {
+                        YtCollectionCard(
+                            item = album,
+                            tag = "[ album ]",
+                            art = art,
+                            artKey = state.settings.rawArt,
+                        ) {
                             dispatch(DmtAction.OpenYtPlaylist(album.browseId, album.title, album.coverUrl))
                         }
                     }
@@ -327,7 +332,12 @@ fun YtArtistDetailPane(
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(artist.playlists, key = { it.browseId }) { pl ->
-                        YtCollectionCard(item = pl, tag = "[ playlist ]") {
+                        YtCollectionCard(
+                            item = pl,
+                            tag = "[ playlist ]",
+                            art = art,
+                            artKey = state.settings.rawArt,
+                        ) {
                             dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
                         }
                     }
@@ -347,7 +357,11 @@ fun YtArtistDetailPane(
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(artist.similarArtists, key = { it.browseId ?: it.name }) { sim ->
-                        YtArtistChipCard(artist = sim) {
+                        YtArtistChipCard(
+                            artist = sim,
+                            art = art,
+                            artKey = state.settings.rawArt,
+                        ) {
                             sim.browseId?.let { id ->
                                 dispatch(DmtAction.OpenYtArtist(id, sim.name, sim.coverUrl))
                             }
@@ -363,32 +377,65 @@ fun YtArtistDetailPane(
 private fun YtCollectionCard(
     item: YtHomePlaylist,
     tag: String,
+    art: suspend (Track) -> Bitmap,
+    artKey: Any,
     onClick: () -> Unit,
 ) {
+    val cover by produceState<Bitmap?>(initialValue = null, item.browseId, item.coverUrl, artKey) {
+        val url = item.coverUrl ?: return@produceState
+        val seed = Track(
+            id = item.browseId.hashCode().toLong(),
+            uri = Uri.parse("youtube://collection/${item.browseId}"),
+            title = item.title,
+            artist = item.subtitle,
+            album = item.title,
+            path = "",
+            durationMs = 0L,
+            mime = "audio/mp4",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = 0L,
+            dateModified = 0L,
+            coverUri = Uri.parse(url),
+            source = TrackSource.YOUTUBE,
+        )
+        value = runCatching { art(seed) }.getOrNull()
+    }
     Column(
         modifier = Modifier
             .width(148.dp)
             .border(1.dp, TuiLine)
-            .background(TuiRaised)
-            .tuiClickable(onClick)
-            .padding(10.dp),
+            .tuiClickable(onClick),
     ) {
-        Text(text = tag, style = MaterialTheme.typography.labelSmall, color = TuiDim)
-        Spacer(modifier = Modifier.height(14.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(TuiRaised),
+        ) {
+            if (cover != null) {
+                AsciiCover(cover = cover!!, playing = false, wave = false)
+            } else {
+                Text(text = tag, style = MaterialTheme.typography.labelSmall, color = TuiDim)
+            }
+        }
         Text(
             text = item.title,
             style = MaterialTheme.typography.bodyMedium,
             color = TuiBright,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 6.dp),
         )
         Text(
             text = item.subtitle.lowercase(),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = TuiDim,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp, bottom = 8.dp),
         )
     }
 }
@@ -396,24 +443,65 @@ private fun YtCollectionCard(
 @Composable
 private fun YtArtistChipCard(
     artist: YtHomeArtist,
+    art: suspend (Track) -> Bitmap,
+    artKey: Any,
     onClick: () -> Unit,
 ) {
+    val cover by produceState<Bitmap?>(initialValue = null, artist.name, artist.coverUrl, artKey) {
+        val url = artist.coverUrl ?: return@produceState
+        val seed = Track(
+            id = (artist.browseId ?: artist.name).hashCode().toLong(),
+            uri = Uri.parse("youtube://artist/${artist.browseId ?: artist.name}"),
+            title = artist.name,
+            artist = artist.name,
+            album = "",
+            path = "",
+            durationMs = 0L,
+            mime = "audio/mp4",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = 0L,
+            dateModified = 0L,
+            coverUri = Uri.parse(url),
+            source = TrackSource.YOUTUBE,
+        )
+        value = runCatching { art(seed) }.getOrNull()
+    }
     Column(
         modifier = Modifier
             .width(136.dp)
             .border(1.dp, TuiLine)
-            .background(TuiRaised)
-            .tuiClickable(onClick)
-            .padding(10.dp),
+            .tuiClickable(onClick),
     ) {
-        Text(text = "[ artist ]", style = MaterialTheme.typography.labelSmall, color = TuiDim)
-        Spacer(modifier = Modifier.height(10.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(TuiRaised),
+        ) {
+            if (cover != null) {
+                AsciiCover(cover = cover!!, playing = false, wave = false)
+            } else {
+                Text(text = "[ artist ]", style = MaterialTheme.typography.labelSmall, color = TuiDim)
+            }
+        }
         Text(
             text = artist.name,
             style = MaterialTheme.typography.bodyMedium,
             color = TuiBright,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 6.dp),
+        )
+        Text(
+            text = "artist",
+            style = MaterialTheme.typography.labelMedium,
+            color = TuiDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp, bottom = 8.dp),
         )
     }
 }
