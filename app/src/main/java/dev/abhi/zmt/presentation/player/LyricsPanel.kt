@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import dev.abhi.zmt.core.common.TuiPanel
 import dev.abhi.zmt.core.common.tuiClickable
+import dev.abhi.zmt.core.common.PacmanLoader
 import dev.abhi.zmt.lyrics.LyricLine
 import dev.abhi.zmt.lyrics.LyricWord
 import dev.abhi.zmt.lyrics.Lyrics
@@ -314,25 +315,24 @@ private fun InterludeRow(
     positionMs: Long,
     modifier: Modifier,
 ) {
-    val annotated = if (state == LineState.ACTIVE) {
+    if (state == LineState.ACTIVE) {
         val span = (line.endMs - line.startMs).coerceAtLeast(1)
         val fraction = ((positionMs - line.startMs).toFloat() / span).coerceIn(0f, 1f)
-        val filled = ceil(fraction * line.text.length).toInt().coerceIn(0, line.text.length)
-        buildAnnotatedString {
-            append(line.text)
-            addStyle(SpanStyle(color = TuiAccent), 0, filled)
-            addStyle(SpanStyle(color = TuiFaint), filled, line.text.length)
-        }
+        PacmanLoader(
+            label = "instrumental",
+            progress = fraction,
+            slots = 14,
+            modifier = modifier.fillMaxWidth(),
+        )
     } else {
-        AnnotatedString(line.text)
+        Text(
+            text = "[ • • • ]",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (state == LineState.PASSED) TuiFaint else TuiDim,
+            textAlign = TextAlign.Center,
+            modifier = modifier.fillMaxWidth(),
+        )
     }
-    Text(
-        text = annotated,
-        style = MaterialTheme.typography.headlineSmall,
-        color = if (state == LineState.PASSED) TuiFaint else TuiDim,
-        textAlign = TextAlign.Center,
-        modifier = modifier.fillMaxWidth(),
-    )
 }
 
 private data class SweepColors(
