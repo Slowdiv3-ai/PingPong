@@ -181,6 +181,91 @@ class StreamCacheManager @Inject constructor(
         }
     }
 
+    /**
+     * Progressive head-start download for instant DSP playback (<0.5s).
+     * Calls [onHeadStartReady] on a background thread as soon as [headStartBytes] (default 256 KB)
+     * is flushed to disk, while continuing to download the remaining audio in the background.
+     */
+    suspend fun downloadProgressive(
+        streamUri: String,
+        resolveUrl: suspend () -> Pair<String, String>?,
+        headStartBytes: Long = 256L * 1024L,
+        onHeadStartReady: (File) -> Unit,
+    ): File? {
+        cachedFileFor(streamUri)?.let {
+            onHeadStartReady(it)
+            return it
+        }
+        val resolved = resolveUrl() ?: return null
+        val (url, userAgent) = resolved
+        val target = fileFor(streamUri)
+        val tmp = File(target.parent, "${target.name}.${System.nanoTime()}.tmp")
+        var headStartFired = false
+
+        try {
+            Log.d(TAG, "Progressive download start: $streamUri")
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 120_000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", userAgent)
+            conn.setRequestProperty("Accept", "*/*")
+            conn.setRequestProperty("Range", "bytes=0-")
+            if (url.contains("c=WEB")) {
+                conn.setRequestProperty("Origin", "https://youtube.com")
+                conn.setRequestProperty("Referer", "https://youtube.com")
+            }
+            conn.connect()
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                Log.w(TAG, "Progressive HTTP $code for $streamUri")
+                conn.disconnect()
+                return null
+            }
+
+            val input = conn.inputStream
+            FileOutputStream(tmp).use { out ->
+                val buf = ByteArray(32 * 1024)
+                var downloaded = 0L
+                var read: Int
+                while (input.read(buf).also { read = it } != -1) {
+                    out.write(buf, 0, read)
+                    downloaded += read
+                    if (!headStartFired && downloaded >= headStartBytes) {
+                        out.flush()
+                        headStartFired = true
+                        Log.d(TAG, "⚡ Head-start ready ($downloaded bytes) for $streamUri")
+                        onHeadStartReady(tmp)
+                    }
+                }
+                out.flush()
+            }
+            conn.disconnect()
+
+            if (tmp.length() > 0) {
+                if (!target.exists()) {
+                    tmp.renameTo(target)
+                } else {
+                    tmp.delete()
+                }
+                val finalFile = if (target.exists()) target else tmp
+                if (!headStartFired) {
+                    headStartFired = true
+                    onHeadStartReady(finalFile)
+                }
+                Log.d(TAG, "Progressive download complete: $streamUri (${finalFile.length()} bytes)")
+                evictIfNeeded()
+                return finalFile
+            }
+            tmp.delete()
+            return null
+        } catch (e: Exception) {
+            Log.w(TAG, "Progressive download failed: $streamUri — ${e.message}")
+            if (!headStartFired) tmp.delete()
+            return null
+        }
+    }
+
 
     /** Compute a stable filename from the stream URI. */
     private fun fileFor(streamUri: String): File {
