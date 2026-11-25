@@ -15,6 +15,12 @@ object LyricsParser {
             trimmed.startsWith("<") && trimmed.contains("<tt") ->
                 TtmlLyricsParser.parse(trimmed)
 
+            KrcLyricsParser.matches(trimmed) ->
+                KrcLyricsParser.parse(trimmed)
+
+            YrcLyricsParser.matches(trimmed) ->
+                YrcLyricsParser.parse(trimmed)
+
             LrcLyricsParser.matches(trimmed) ->
                 LrcLyricsParser.parse(trimmed)
 
