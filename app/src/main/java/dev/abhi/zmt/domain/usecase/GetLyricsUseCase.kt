@@ -1,6 +1,7 @@
 package dev.abhi.zmt.domain.usecase
 
 import dev.abhi.zmt.data.remote.jellyfin.JellyfinApi
+import dev.abhi.zmt.data.remote.lyrics.OnlineLyricsAggregator
 import dev.abhi.zmt.data.remote.lrclib.LrclibApi
 import dev.abhi.zmt.lyrics.LyricsParser
 import dev.abhi.zmt.lyrics.Lyrics
@@ -16,7 +17,7 @@ import javax.inject.Inject
 class GetLyricsUseCase @Inject constructor(
     private val lyricsRepository: LyricsRepository,
     private val jellyfinApi: JellyfinApi,
-    private val lrclibApi: LrclibApi,
+    private val onlineLyricsAggregator: OnlineLyricsAggregator,
     private val settingsRepository: PreferencesRepository,
 ) {
 
@@ -28,10 +29,10 @@ class GetLyricsUseCase @Inject constructor(
                 lyricsRepository.lyricsFor(track.path, track.mime)
             }
         }
-
+    
     suspend fun onlineText(track: Track): String? =
         withContext(Dispatchers.IO) {
-            runCatching { lrclibApi.fetchLyrics(track) }.getOrNull()
+            runCatching { onlineLyricsAggregator.fetchBestLyrics(track) }.getOrNull()
         }
 
     suspend fun parse(text: String): Lyrics? =
