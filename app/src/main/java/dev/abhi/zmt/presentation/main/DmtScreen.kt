@@ -224,7 +224,7 @@ fun DmtScreen(
                     text = "pingpong@arch:~$ cd /$routeSlug",
                     style = MaterialTheme.typography.labelSmall,
                     color = TuiDim,
-                    charDelayMs = 14L,
+                    charDelayMs = 42L,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
                 PaneHost(
