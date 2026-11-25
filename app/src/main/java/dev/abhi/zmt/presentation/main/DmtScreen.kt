@@ -212,7 +212,7 @@ fun DmtScreen(
                 TabsRow(state, dispatch)
                 val routeSlug = when (state.view) {
                     DmtView.HOME -> "home"
-                    DmtView.LIBRARY -> if (state.sourceMode == SourceMode.YOUTUBE) "yt/search" else "local/library"
+                    DmtView.LIBRARY -> if (state.settings.sourceMode == SourceMode.YOUTUBE) "yt/search" else "local/library"
                     DmtView.PLAYLISTS -> "playlists"
                     DmtView.IMPORTED -> "imported"
                     DmtView.SOURCES -> "sources"
@@ -527,10 +527,11 @@ private fun Titlebar(state: DmtState, dispatch: (DmtAction) -> Unit) {
                 .size(9.dp)
                 .background(TuiAccent),
         )
-        Text(
+        TuiTypingText(
             text = " " + stringResource(R.string.app_name) + " ",
             style = MaterialTheme.typography.titleMedium,
             color = TuiBright,
+            charDelayMs = 28L,
         )
         HorizontalDivider(color = TuiLine, modifier = Modifier.weight(1f))
         Spacer(modifier = Modifier.width(10.dp))
@@ -539,6 +540,7 @@ private fun Titlebar(state: DmtState, dispatch: (DmtAction) -> Unit) {
         ConfigTab(state, dispatch)
     }
 }
+
 
 @Composable
 private fun libraryTabs(state: DmtState): List<Pair<String, DmtView>> =
