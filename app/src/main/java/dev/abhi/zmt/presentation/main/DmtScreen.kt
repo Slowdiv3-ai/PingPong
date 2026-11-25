@@ -52,7 +52,6 @@ import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.FitScaled
 import dev.abhi.zmt.core.common.PacmanLoader
 import dev.abhi.zmt.core.common.ScrollMemory
-import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.core.common.TuiNotice
 import dev.abhi.zmt.core.common.TuiTab
 import dev.abhi.zmt.core.common.TuiTypingText
@@ -451,13 +450,16 @@ private fun SideRail(state: DmtState, dispatch: (DmtAction) -> Unit) {
             Box(
                 modifier = Modifier
                     .size(9.dp)
-        TuiTypingText(
-            text = " " + stringResource(R.string.app_name) + " ",
-            style = MaterialTheme.typography.titleMedium,
-            color = TuiBright,
-            charDelayMs = 28L,
-        )
+                    .background(TuiAccent),
+            )
+            TuiTypingText(
+                text = " " + stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleMedium,
+                color = TuiBright,
+                charDelayMs = 28L,
+            )
         }
+
         HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 8.dp))
 
         Spacer(modifier = Modifier.height(12.dp))
