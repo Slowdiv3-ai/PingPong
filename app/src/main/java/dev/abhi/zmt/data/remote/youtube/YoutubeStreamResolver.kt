@@ -159,13 +159,17 @@ class YoutubeStreamResolver @Inject constructor(
             var formatId: String? = null
             var fileSize = 0L
             var headers = emptyMap<String, String>()
-
             if (response.formats != null) {
-                val audioFormats = response.formats.filter { it.isAudioOnly && it.url != null }
+                val validFormats = response.formats.filter { fmt ->
+                    val id = fmt.formatId.orEmpty()
+                    val acodec = fmt.acodec.orEmpty()
+                    fmt.url != null &&
+                        !id.startsWith("sb") &&
+                        acodec != "none" &&
+                        acodec.isNotBlank()
+                }
+                val audioFormats = validFormats.filter { it.isAudioOnly }
                 val bestAudio = audioFormats.maxByOrNull { it.audioBitrate ?: 0.0 }
-
-                if (url == null) { 
-                    url = response.url; formatId = response.formatId; fileSize = response.fileSize }
 
                 if (bestAudio != null) {
                     url = bestAudio.url
@@ -174,16 +178,21 @@ class YoutubeStreamResolver @Inject constructor(
                     headers = bestAudio.httpHeaders ?: emptyMap()
                     Log.d(TAG, "yt-dlp: picked audio format ${bestAudio.formatId} (${bestAudio.audioBitrate}kbps)")
                 } else {
-                    val anyFormat = response.formats.firstOrNull { it.url != null }
+                    val anyFormat = validFormats.firstOrNull()
                     if (anyFormat != null) {
                         url = anyFormat.url
                         formatId = anyFormat.formatId
                         fileSize = anyFormat.fileSize ?: 0L
                         headers = anyFormat.httpHeaders ?: emptyMap()
                         Log.d(TAG, "yt-dlp: picked format ${anyFormat.formatId}")
+                    } else if (!response.formatId.orEmpty().startsWith("sb")) {
+                        url = response.url
+                        formatId = response.formatId
+                        fileSize = response.fileSize
                     }
                 }
             }
+
 
             if (url == null) {
                 Log.w(TAG, "yt-dlp returned no URL for $videoId (${response.formats?.size ?: 0} formats)")
