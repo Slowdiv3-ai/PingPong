@@ -60,15 +60,15 @@ class YoutubeStreamResolver @Inject constructor(
     private val youTubeDLBridge: YouTubeDLBridge,
 ) {
     suspend fun resolve(videoId: String): ResolvedStream? {
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) return ytdl
-
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
             val stream = resolveViaInnertubeContext(videoId, context)
             if (stream != null) return stream
             delay(RETRY_DELAY_MS)
         }
+
+        val ytdl = resolveViaYtDlp(videoId)
+        if (ytdl != null) return ytdl
 
         val piped = resolveViaPiped(videoId)
         if (piped != null) return piped
@@ -111,9 +111,6 @@ class YoutubeStreamResolver @Inject constructor(
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
         val results = mutableListOf<ResolvedStream>()
 
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) results.add(ytdl)
-
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) break
             val stream = resolveViaInnertubeContext(videoId, context)
@@ -121,6 +118,11 @@ class YoutubeStreamResolver @Inject constructor(
                 results.add(stream)
             }
             delay(RETRY_DELAY_MS)
+        }
+
+        if (results.isEmpty()) {
+            val ytdl = resolveViaYtDlp(videoId)
+            if (ytdl != null) results.add(ytdl)
         }
 
         Log.d(TAG, "resolveAll($videoId): ${results.size} options")
@@ -213,16 +215,19 @@ class YoutubeStreamResolver @Inject constructor(
             val response = result?.getOrNull() ?: return null
             val streamingData = response.streamingData ?: return null
 
-            val formats = streamingData.adaptiveFormats
-            if (formats.isNullOrEmpty()) return null
+            val adaptive = streamingData.adaptiveFormats.orEmpty()
+            val progressive = streamingData.formats.orEmpty()
 
-            val format = formats
+            val format = adaptive
                 .filter { it.mimeType.startsWith("audio/") }
                 .let { audioFormats ->
                     audioFormats.find { it.url != null && it.itag == 140 }
                         ?: audioFormats.find { it.url != null && it.itag == 251 }
                         ?: audioFormats.find { it.url != null }
-                } ?: return null
+                }
+                ?: progressive.find { it.url != null && it.itag == 18 }
+                ?: progressive.find { it.url != null }
+                ?: return null
 
             val url = format.url
             if (url == null) {
