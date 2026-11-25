@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import dev.abhi.zmt.R
+import dev.abhi.zmt.core.common.OdometerTimeText
 import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.core.common.CursorTitle
 import dev.abhi.zmt.core.common.FitScaled
@@ -665,8 +666,8 @@ private fun SeekRow(state: DmtState, dispatch: (DmtAction) -> Unit) {
             .fillMaxWidth()
             .padding(top = 8.dp),
     ) {
-        Text(
-            text = shownPosition.asTime(),
+        OdometerTimeText(
+            time = shownPosition.asTime(),
             style = MaterialTheme.typography.labelSmall,
             color = if (scrub != null) TuiAccent else TuiDim,
         )
