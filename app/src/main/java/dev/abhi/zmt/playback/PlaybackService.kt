@@ -571,7 +571,9 @@ class PlaybackService : MediaLibraryService() {
             scope.launch {
                 streamCache.cacheInBackground(nextUri) {
                     val videoId = nextUri.removePrefix("youtube://video/")
-                    if (videoId.isNotBlank() && videoId != nextUri) youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) } else null
+                    if (videoId.isNotBlank() && videoId != nextUri) {
+                        youtubeStreamResolver.resolveViaYtDlp(videoId)?.let { Pair(it.url, it.userAgent) }
+                    } else null
                 }
             }
             scope.launch(Dispatchers.IO) { streamCache.evictIfNeeded() }
