@@ -159,7 +159,6 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
                             val title = twoRow.title?.text ?: continue
                             val subtitle = twoRow.subtitle?.runs?.joinToString("") { it.text.orEmpty() }.orEmpty()
                             val thumb = twoRow.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
-
                             when {
                                 browse?.browseId != null && (browse.browseId.startsWith("VL") || browse.browseId.startsWith("MPRE") || browse.browseId.startsWith("RD")) -> {
                                     playlists.add(YtHomePlaylist(browse.browseId, title, subtitle, thumb))
@@ -167,31 +166,8 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
                                 browse?.browseId != null && browse.browseId.startsWith("UC") -> {
                                     artists.add(YtHomeArtist(title, browse.browseId, thumb))
                                 }
-                                watch?.videoId != null -> {
-                                    val vid = watch.videoId
-                                    tracks.add(
-                                        Track(
-                                            id = vid.hashCode().toLong(),
-                                            uri = Uri.parse("youtube://video/$vid"),
-                                            title = title,
-                                            artist = subtitle.ifBlank { "YouTube Music" },
-                                            album = "YouTube",
-                                            path = "youtube://video/$vid",
-                                            durationMs = 0L,
-                                            mime = "audio/mpeg",
-                                            bitrate = 0,
-                                            size = 0L,
-                                            trackNumber = 0,
-                                            dateAdded = System.currentTimeMillis(),
-                                            dateModified = System.currentTimeMillis(),
-                                            coverUri = thumb?.let { Uri.parse(it) },
-                                            source = TrackSource.YOUTUBE,
-                                            remoteId = vid,
-                                        )
-                                    )
-                                }
                             }
-                        }
+
                         val listItem = item.musicResponsiveListItemRenderer
                         if (listItem != null) {
                             Innertube.SongItem.from(listItem)?.toTrack()?.let { tracks.add(it) }
