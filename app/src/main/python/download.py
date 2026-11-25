@@ -24,7 +24,7 @@ def download(quickjs_bin: str, video_id: str) -> str:
         "extractor_args": {
             "youtube": {
                 # ios and tv clients return direct audio links much faster than web
-                "player_client": ["ios", "tv", "android", "web"],
+                "player_client": ["android_vr", "ios", "tv", "android", "web"],
                 "player_skip": ["webpage", "configs"],
             }
         },
