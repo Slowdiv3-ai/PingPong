@@ -14,35 +14,24 @@ def download(quickjs_bin: str, video_id: str) -> str:
     - Client rotation
     """
     opts = {
-        # Pick the best audio-only format, or best combined if no audio-only
-        "format": "bestaudio[acodec!=none]/bestaudio/best",
-        # Request format info so we get url, http_headers, etc.
+        # Strictly grab audio-only streams (m4a or webm) instead of 16MB MP4 videos
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[vcodec=none]/bestaudio",
         "skip_download": True,
-        # Quiet output to avoid polluting our logs
         "quiet": True,
         "no_warnings": True,
-        # Use geo bypass for region-locked content
         "geo_bypass": True,
-        # Don't check certificates (some proxies need this)
         "no_check_certificates": True,
-        # Extractor args to try different clients
         "extractor_args": {
             "youtube": {
-                "player_client": ["web", "android", "ios", "tv"],
-                "player_skip": ["webpage"],
+                # ios and tv clients return direct audio links much faster than web
+                "player_client": ["ios", "tv", "android", "web"],
+                "player_skip": ["webpage", "configs"],
             }
         },
-        # HTTP headers for better compatibility
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "*/*",
-        },
-        # Source address preference
         "source_address": "0.0.0.0",
-        # Socket timeout
-        "socket_timeout": 30,
+        "socket_timeout": 15,
     }
+
 
     if quickjs_bin:
         opts["js_runtimes"] = {"quickjs": {"path": quickjs_bin}}
@@ -87,19 +76,26 @@ def download(quickjs_bin: str, video_id: str) -> str:
             }
             result["formats"].append(fmt_entry)
         
-        # If top-level URL is missing, find the best audio format with a URL
+        # If top-level URL is missing, sort and pick the best audio-only stream
         if not result["url"]:
-            for fmt in result["formats"]:
-                if fmt["url"] and fmt["vcodec"] == "none":
-                    result["url"] = fmt["url"]
-                    result["format_id"] = fmt["format_id"]
-                    result["ext"] = fmt["ext"]
-                    result["filesize"] = fmt["filesize"]
-                    result["acodec"] = fmt["acodec"]
-                    result["abr"] = fmt["abr"]
-                    break
+            audio_only = [
+                f for f in result["formats"]
+                if f["url"] and f["vcodec"] == "none" and f["acodec"] != "none"
+            ]
+            audio_only.sort(
+                key=lambda x: (x["ext"] in ("m4a", "webm"), x["abr"] or 0),
+                reverse=True
+            )
+            if audio_only:
+                best = audio_only
+                result["url"] = best["url"]
+                result["format_id"] = best["format_id"]
+                result["ext"] = best["ext"]
+                result["filesize"] = best["filesize"]
+                result["acodec"] = best["acodec"]
+                result["abr"] = best["abr"]
             # If still no URL, try any format with a URL
-            if not result["url"]:
+            elif result["formats"]:
                 for fmt in result["formats"]:
                     if fmt["url"]:
                         result["url"] = fmt["url"]
@@ -107,7 +103,7 @@ def download(quickjs_bin: str, video_id: str) -> str:
                         result["ext"] = fmt["ext"]
                         result["filesize"] = fmt["filesize"]
                         break
-        
+
         return json.dumps(result, indent=4)
         
     except yt_dlp.utils.DownloadError as e:
