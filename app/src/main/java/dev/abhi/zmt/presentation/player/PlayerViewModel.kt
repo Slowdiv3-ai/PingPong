@@ -1740,9 +1740,9 @@ class PlayerViewModel @Inject constructor(
         val id = currentState.nowPlayingId ?: return
         if (currentState.lyricsFetching || currentState.lyrics != null) return
         val track = currentState.tracks.find { it.id.toString() == id }
-            ?: currentState.currentTrack
-            ?: lookupCurrentTrack()
-            ?: controller?.currentMediaItem?.let { item ->
+            ?: currentState.currentTrack?.takeIf { it.id.toString() == id }
+            ?: lookupCurrentTrack()?.takeIf { it.id.toString() == id }
+            ?: controller?.currentMediaItem?.takeIf { it.mediaId == id }?.let { item ->
                 Track(
                     id = id.toLongOrNull() ?: 0L,
                     uri = item.localConfiguration?.uri ?: Uri.EMPTY,
@@ -1809,10 +1809,12 @@ class PlayerViewModel @Inject constructor(
 
     private fun loadLyrics(mediaItem: MediaItem?) {
         val forId = mediaItem?.mediaId
-        reduce { it.copy(lyricsFetching = true) }
+        reduce { it.copy(lyrics = null, lyricsFetching = true) }
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
             val track = currentState.tracks.find { it.id.toString() == forId }
+                ?: currentState.currentTrack?.takeIf { it.id.toString() == forId }
+                ?: lookupCurrentTrack()?.takeIf { it.id.toString() == forId }
             val lyrics = track?.let { getLyrics(it) }
             reduce {
                 if (it.nowPlayingId != forId) {
@@ -1823,6 +1825,7 @@ class PlayerViewModel @Inject constructor(
             }
         }
     }
+
 
     private fun loadCover(mediaItem: MediaItem?) {
         val uri: Uri? = mediaItem?.mediaMetadata?.artworkUri
