@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import dev.abhi.zmt.R
+import dev.abhi.zmt.core.common.PacmanSeekBar
 import dev.abhi.zmt.core.common.OdometerTimeText
 import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.core.common.CursorTitle
@@ -671,8 +672,9 @@ private fun SeekRow(state: DmtState, dispatch: (DmtAction) -> Unit) {
             style = MaterialTheme.typography.labelSmall,
             color = if (scrub != null) TuiAccent else TuiDim,
         )
-        ThinSlider(
+        PacmanSeekBar(
             fraction = scrub ?: playFraction,
+            isPlaying = state.isPlaying,
             onScrub = {
                 scrub = it
                 if (it != null) seekPending = false
@@ -683,7 +685,7 @@ private fun SeekRow(state: DmtState, dispatch: (DmtAction) -> Unit) {
             },
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 8.dp),
         )
         Text(
             text = state.durationMs.asTime(),
