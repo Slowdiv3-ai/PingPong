@@ -59,9 +59,26 @@ data class ResolvedStream(
 class YoutubeStreamResolver @Inject constructor(
     private val youTubeDLBridge: YouTubeDLBridge,
 ) {
+    private val urlCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, ResolvedStream>>()
+
+    private fun getCachedStream(videoId: String): ResolvedStream? {
+        val entry = urlCache[videoId] ?: return null
+        if (System.currentTimeMillis() - entry.first > 30 * 60 * 1000L) {
+            urlCache.remove(videoId)
+            return null
+        }
+        return entry.second
+    }
+
     suspend fun resolve(videoId: String): ResolvedStream? {
+        getCachedStream(videoId)?.let { return it }
+
         val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) return ytdl
+        if (ytdl != null) {
+            urlCache[videoId] = System.currentTimeMillis() to ytdl
+            return ytdl
+        }
+
 
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
@@ -109,13 +126,17 @@ class YoutubeStreamResolver @Inject constructor(
 
 
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
+        getCachedStream(videoId)?.let { return listOf(it) }
+
         val results = mutableListOf<ResolvedStream>()
 
         // Try yt-dlp first since it handles YouTube 403/PO-token workarounds cleanly
         val ytdl = resolveViaYtDlp(videoId)
         if (ytdl != null) {
+            urlCache[videoId] = System.currentTimeMillis() to ytdl
             results.add(ytdl)
         }
+
 
         // Only query Innertube if yt-dlp returned nothing
         if (results.isEmpty()) {
