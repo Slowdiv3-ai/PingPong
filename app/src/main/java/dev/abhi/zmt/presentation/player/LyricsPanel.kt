@@ -256,6 +256,8 @@ private fun LyricLineRows(
                 run = run,
                 state = state,
                 positionMs = positionMs,
+                lineStartMs = shown.startMs,
+                lineEndMs = shown.endMs,
                 singerColor = singerColor,
                 hasSinger = hasSinger,
                 align = align,
@@ -354,81 +356,93 @@ private fun runState(
         else -> LineState.ACTIVE
     }
 }
-
 @Composable
 private fun LyricRunText(
     run: LyricRun,
     state: LineState,
     positionMs: Long,
+    lineStartMs: Long,
+    lineEndMs: Long,
     singerColor: Color,
     hasSinger: Boolean,
     align: TextAlign,
 ) {
     val sweepState = runState(run, positionMs, state)
-    val karaoke = sweepState == LineState.ACTIVE && run.words.isNotEmpty()
-    val sweepColors = if (run.background) {
-        SweepColors(
-            sung = TuiFg,
-            unsung = TuiFaint,
-        )
-    } else {
-        SweepColors(
-            sung = singerColor,
-            unsung = TuiDim,
-        )
-    }
-
-    val annotated: AnnotatedString = if (karaoke) {
-        buildAnnotatedString {
-            append(run.text)
-            run.words.forEach { word ->
-                when {
-                    positionMs >= word.endMs ->
-                        addStyle(SpanStyle(color = sweepColors.sung), word.start, word.end)
-
-                    positionMs >= word.startMs -> {
-                        val span = (word.endMs - word.startMs).coerceAtLeast(1)
-                        val fraction =
-                            ((positionMs - word.startMs).toFloat() / span).coerceIn(0f, 1f)
-                        val length = word.end - word.start
-                        val exact = fraction * length
-                        val sungEnd = word.start + exact.toInt().coerceIn(0, length - 1)
-                        if (sungEnd > word.start) {
-                            addStyle(SpanStyle(color = sweepColors.sung), word.start, sungEnd)
-                        }
-                        val edge = lerp(sweepColors.unsung, sweepColors.sung, exact - exact.toInt())
-                        addStyle(SpanStyle(color = edge), sungEnd, sungEnd + 1)
-                        if (sungEnd + 1 < word.end) {
-                            addStyle(SpanStyle(color = sweepColors.unsung), sungEnd + 1, word.end)
-                        }
-                    }
-
-                    else ->
-                        addStyle(SpanStyle(color = sweepColors.unsung), word.start, word.end)
-                }
-            }
-        }
-    } else {
-        AnnotatedString(run.text)
-    }
-
-    val lineColor = when {
-        run.background && sweepState == LineState.ACTIVE -> TuiFg
-        run.background && sweepState == LineState.PASSED -> TuiFaint
-        run.background -> TuiDim
-        sweepState == LineState.ACTIVE && karaoke -> TuiDim
-        sweepState == LineState.ACTIVE -> singerColor
-        sweepState == LineState.PASSED && hasSinger -> lerp(singerColor, TuiFaint, 0.8f)
-        sweepState == LineState.PASSED -> TuiFaint
-        else -> TuiDim
-    }
-
     val baseStyle = if (run.background) {
         MaterialTheme.typography.bodySmall
     } else {
         MaterialTheme.typography.headlineSmall
     }
     val arabic = remember(run.text) { isArabicScript(run.text) }
+
+    // Upcoming lines stay queued as a subtle terminal prompt until their timestamp arrives
+    if (sweepState == LineState.UPCOMING && lineStartMs >= 0) {
+        if (!run.background) {
+            Text(
+                text = "> ...",
+                style = baseStyle.copy(letterSpacing = 0.sp),
+                color = TuiFaint.copy(alpha = 0.45f),
+                textAlign = align,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        return
+    }
+
+    val activeColor = if (run.background) TuiFg else singerColor
+    val passedColor = when {
+        run.background -> TuiFaint
+        hasSinger -> lerp(singerColor, TuiFaint, 0.8f)
+        else -> TuiFaint
+    }
+
+    val annotated: AnnotatedString = when {
+        sweepState == LineState.PASSED || lineStartMs < 0 -> {
+            buildAnnotatedString {
+                addStyle(SpanStyle(color = passedColor), 0, 0)
+                append(run.text)
+            }
+        }
+        run.words.isNotEmpty() -> {
+            // Word-by-word terminal typing with live block cursor
+            var visibleChars = 0
+            for (word in run.words) {
+                when {
+                    positionMs >= word.endMs -> visibleChars = word.end
+                    positionMs >= word.startMs -> {
+                        val span = (word.endMs - word.startMs).coerceAtLeast(1)
+                        val frac = ((positionMs - word.startMs).toFloat() / span).coerceIn(0f, 1f)
+                        val typedInWord = ceil(frac * (word.end - word.start)).toInt()
+                        visibleChars = (word.start + typedInWord).coerceIn(0, run.text.length)
+                        break
+                    }
+                    else -> break
+                }
+            }
+            val typed = run.text.take(visibleChars.coerceIn(0, run.text.length))
+            buildAnnotatedString {
+                append(typed)
+                addStyle(SpanStyle(color = activeColor), 0, typed.length)
+                append("█")
+                addStyle(SpanStyle(color = TuiAccent), typed.length, typed.length + 1)
+            }
+        }
+        else -> {
+            // Line-synced terminal typing across the line duration
+            val span = (lineEndMs - lineStartMs).coerceAtLeast(1)
+            val frac = ((positionMs - lineStartMs).toFloat() / span).coerceIn(0f, 1f)
+            val visibleChars = ceil(frac * run.text.length).toInt().coerceIn(0, run.text.length)
+            val typed = run.text.take(visibleChars)
+            buildAnnotatedString {
+                append(typed)
+                addStyle(SpanStyle(color = activeColor), 0, typed.length)
+                if (visibleChars < run.text.length) {
+                    append("█")
+                    addStyle(SpanStyle(color = TuiAccent), typed.length, typed.length + 1)
+                }
+            }
+        }
+    }
 
     Text(
         text = annotated,
@@ -442,7 +456,7 @@ private fun LyricRunText(
             letterSpacing = 0.sp,
             textDirection = TextDirection.Content,
         ),
-        color = lineColor,
+        color = if (sweepState == LineState.ACTIVE) activeColor else passedColor,
         textAlign = align,
         modifier = Modifier.fillMaxWidth(),
     )
