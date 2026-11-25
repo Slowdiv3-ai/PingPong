@@ -121,10 +121,10 @@ class YoutubeStreamResolver @Inject constructor(
             }
         }
 
-        // Always include yt-dlp as Option 2 in case Innertube's direct URL returns HTTP 403
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null && results.none { it.url == ytdl.url }) {
-            results.add(ytdl)
+        // Only run yt-dlp as a fallback if Innertube returned no stream at all
+        if (results.isEmpty()) {
+            val ytdl = resolveViaYtDlp(videoId)
+            if (ytdl != null) results.add(ytdl)
         }
         Log.d(TAG, "resolveAll($videoId): ${results.size} options")
         return results
