@@ -133,16 +133,19 @@ class StreamCacheManager @Inject constructor(
             conn.setRequestProperty("User-Agent", userAgent)
             conn.setRequestProperty("Accept", "*/*")
             conn.setRequestProperty("Range", "bytes=0-")
-            conn.setRequestProperty("Origin", "https://youtube.com")
-            conn.setRequestProperty("Referer", "https://youtube.com/")
-            conn.connect()
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                Log.w(TAG, "Download HTTP $code for $streamUri (ua=$userAgent)")
-                conn.disconnect()
-                return null
+            if (url.contains("c=WEB")) {
+                conn.setRequestProperty("Origin", "https://youtube.com")
+                conn.setRequestProperty("Referer", "https://youtube.com")
             }
-            val total = conn.contentLength
+                    conn.connect()
+                    val code = conn.responseCode
+                    if (code !in 200..299) {
+                        Log.w(TAG, "Background cache HTTP $code for $streamUri")
+                        conn.disconnect()
+                        return@runBlocking
+                    }
+
+                    val total = conn.contentLength
             val input = conn.inputStream
             FileOutputStream(tmp).use { out ->
                 val buf = ByteArray(64 * 1024)
