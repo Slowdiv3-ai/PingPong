@@ -60,6 +60,7 @@ object KrcLyricsParser {
                     endMs = (wStart + wDur).coerceAtLeast(wStart + 1L),
                     start = charStart,
                     end = charEnd,
+                    background = false,
                 )
             }
 
