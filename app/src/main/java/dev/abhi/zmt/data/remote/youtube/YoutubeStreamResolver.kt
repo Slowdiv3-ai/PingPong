@@ -121,10 +121,10 @@ class YoutubeStreamResolver @Inject constructor(
             }
         }
 
-        // Always include yt-dlp as an immediate fallback in case Innertube's URL returns 403
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null && results.none { it.url == ytdl.url }) {
-            results.add(ytdl)
+        // Only run slow yt-dlp if Innertube returned no stream at all
+        if (results.isEmpty()) {
+            val ytdl = resolveViaYtDlp(videoId)
+            if (ytdl != null) results.add(ytdl)
         }
 
         Log.d(TAG, "resolveAll($videoId): ${results.size} options")
@@ -229,15 +229,12 @@ class YoutubeStreamResolver @Inject constructor(
             val adaptive = streamingData.adaptiveFormats.orEmpty()
             val progressive = streamingData.formats.orEmpty()
 
-            val format = progressive.find { it.url != null && it.itag == 18 }
+            val audioFormats = adaptive.filter { it.mimeType.startsWith("audio/") }
+            val format = audioFormats.find { it.url != null && it.itag == 140 }
+                ?: audioFormats.find { it.url != null && it.itag == 251 }
+                ?: audioFormats.find { it.url != null }
+                ?: progressive.find { it.url != null && it.itag == 18 }
                 ?: progressive.find { it.url != null }
-                ?: adaptive
-                    .filter { it.mimeType.startsWith("audio/") }
-                    .let { audioFormats ->
-                        audioFormats.find { it.url != null && it.itag == 140 }
-                            ?: audioFormats.find { it.url != null && it.itag == 251 }
-                            ?: audioFormats.find { it.url != null }
-                    }
                 ?: return null
             val url = format.url
             if (url == null) {
