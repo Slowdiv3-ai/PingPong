@@ -352,15 +352,11 @@ suspend fun radioFor(videoId: String): List<Track> {
             val resp = Innertube.client.post("/youtubei/v1/browse") {
                 setBody(BrowseBody(browseId = browseId))
             }.body<BrowseResponse>()
-
             val headerThumb = resp.header?.musicImmersiveHeaderRenderer?.thumbnail
                 ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
-                ?: resp.header?.musicVisualHeaderRenderer?.thumbnail
-                    ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
                 ?: fallbackCover
 
             val headerTitle = resp.header?.musicImmersiveHeaderRenderer?.title?.text
-                ?: resp.header?.musicVisualHeaderRenderer?.title?.text
                 ?: fallbackName
 
             val sections = resp.contents
