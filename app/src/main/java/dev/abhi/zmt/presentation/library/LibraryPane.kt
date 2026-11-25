@@ -1,7 +1,15 @@
 package dev.abhi.zmt.presentation.library
 
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +34,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.abhi.zmt.data.repository.YtHomeArtist
 import dev.abhi.zmt.R
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.ListRow
@@ -33,6 +42,7 @@ import dev.abhi.zmt.core.common.SearchRow
 import dev.abhi.zmt.core.common.TrackBadges
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
+import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.domain.model.Artist
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Track
@@ -44,6 +54,9 @@ import dev.abhi.zmt.presentation.player.LibrarySection
 import dev.abhi.zmt.presentation.player.SheetHeader
 import dev.abhi.zmt.presentation.player.TuiSheet
 import dev.abhi.zmt.ui.theme.TuiAccent
+import dev.abhi.zmt.ui.theme.TuiBright
+import dev.abhi.zmt.ui.theme.TuiLine
+import dev.abhi.zmt.ui.theme.TuiRaised
 import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiFaint
 import dev.abhi.zmt.ui.theme.TuiFg
@@ -352,3 +365,70 @@ private fun CreateFromSelectionSheet(
         }
     }
 }
+
+@Composable
+private fun SearchArtistCard(
+    artist: YtHomeArtist,
+    art: suspend (Track) -> Bitmap,
+    artKey: Any,
+    onClick: () -> Unit,
+) {
+    val cover by produceState<Bitmap?>(initialValue = null, artist.name, artist.coverUrl, artKey) {
+        val url = artist.coverUrl ?: return@produceState
+        val seed = Track(
+            id = (artist.browseId ?: artist.name).hashCode().toLong(),
+            uri = Uri.parse("youtube://artist/${artist.browseId ?: artist.name}"),
+            title = artist.name,
+            artist = artist.name,
+            album = "",
+            path = "",
+            durationMs = 0L,
+            mime = "audio/mp4",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = 0L,
+            dateModified = 0L,
+            coverUri = Uri.parse(url),
+            source = TrackSource.YOUTUBE,
+        )
+        value = runCatching { art(seed) }.getOrNull()
+    }
+    Column(
+        modifier = Modifier
+            .width(124.dp)
+            .border(1.dp, TuiLine)
+            .tuiClickable(onClick),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(TuiRaised),
+        ) {
+            if (cover != null) {
+                AsciiCover(cover = cover!!, playing = false, wave = false)
+            } else {
+                Text("[ artist ]", style = MaterialTheme.typography.labelSmall, color = TuiDim)
+            }
+        }
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TuiBright,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 6.dp),
+        )
+        Text(
+            text = "artist",
+            style = MaterialTheme.typography.labelMedium,
+            color = TuiDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp, bottom = 8.dp),
+        )
+    }
+}
+
