@@ -212,7 +212,7 @@ fun DmtScreen(
                 TabsRow(state, dispatch)
                 val routeSlug = when (state.view) {
                     DmtView.HOME -> "home"
-                    DmtView.LIBRARY -> if (state.sourceFilter == TrackSource.YOUTUBE) "yt/search" else "local/library"
+                    DmtView.LIBRARY -> if (state.sourceMode == SourceMode.YOUTUBE) "yt/search" else "local/library"
                     DmtView.PLAYLISTS -> "playlists"
                     DmtView.IMPORTED -> "imported"
                     DmtView.SOURCES -> "sources"
