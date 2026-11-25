@@ -34,6 +34,8 @@ import dev.abhi.zmt.R
 import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.tuiClickable
+import dev.abhi.zmt.core.common.PacmanLoader
+import dev.abhi.zmt.core.common.TuiTypingText
 import androidx.compose.runtime.LaunchedEffect
 import dev.abhi.zmt.data.repository.YtHomePlaylist
 import dev.abhi.zmt.data.repository.YtHomeArtist
@@ -218,22 +220,16 @@ private fun ShelfHeader(label: String, onMore: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 14.dp, bottom = 8.dp),
+            .padding(top = 18.dp, bottom = 8.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleLarge,
+        TuiTypingText(
+            text = "> $label",
+            style = MaterialTheme.typography.titleMedium,
             color = TuiBright,
+            charDelayMs = 14L,
+            modifier = Modifier.weight(1f),
         )
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = ">",
-            style = MaterialTheme.typography.labelLarge,
-            color = TuiDim,
-            modifier = Modifier
-                .tuiClickable(onMore)
-                .padding(horizontal = 8.dp),
-        )
+        TuiKey(label = "[ more ]", onClick = onMore)
     }
 }
 
@@ -382,22 +378,17 @@ private fun YoutubeHomeSection(
     art: suspend (Track) -> Bitmap,
 ) {
     val ytHome = state.ytHome
-
-    if (state.ytHomeLoading && ytHome.tracks.isEmpty() && ytHome.playlists.isEmpty()) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 48.dp),
-        ) {
-            Text(
-                text = "loading youtube music feed...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = TuiDim,
-            )
+        if (state.ytHomeLoading && ytHome.playlists.isEmpty() && ytHome.tracks.isEmpty()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 36.dp),
+            ) {
+                PacmanLoader(label = "syncing youtube music feed")
+            }
+            return
         }
-        return
-    }
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Text(
