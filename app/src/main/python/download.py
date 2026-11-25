@@ -15,7 +15,7 @@ def download(quickjs_bin: str, video_id: str) -> str:
     """
     opts = {
         # Strictly grab audio-only streams (m4a or webm) instead of 16MB MP4 videos
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        "format": "bestaudio[acodec!=none][ext=m4a]/bestaudio[acodec!=none][ext=webm]/bestaudio[acodec!=none]/best[acodec!=none]",
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
@@ -80,7 +80,10 @@ def download(quickjs_bin: str, video_id: str) -> str:
         if not result["url"]:
             audio_only = [
                 f for f in result["formats"]
-                if f["url"] and f["vcodec"] == "none" and f["acodec"] != "none"
+                if f["url"]
+                and f["vcodec"] == "none"
+                and f["acodec"] not in ("none", "", None)
+                and not str(f["format_id"]).startswith("sb")
             ]
             audio_only.sort(
                 key=lambda x: (x["ext"] in ("m4a", "webm"), x["abr"] or 0),
