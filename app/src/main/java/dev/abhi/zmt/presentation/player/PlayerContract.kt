@@ -82,6 +82,7 @@ data class DmtState(
     val ytPlaylistDetail: YtPlaylistDetail? = null,
     val ytArtistDetail: YtArtistDetail? = null,
     val ytDetailLoading: Boolean = false,
+    val ytPreviousView: DmtView = DmtView.HOME,
     val ytSearchedArtists: List<YtHomeArtist> = emptyList(),
     val tech: List<Spec> = emptyList(),
     val route: List<Spec> = emptyList(),
