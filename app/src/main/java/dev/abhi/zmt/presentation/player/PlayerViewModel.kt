@@ -196,14 +196,22 @@ class PlayerViewModel @Inject constructor(
         connect()
     }
 
-    private suspend fun performYouTubeSearch(query: String) {
+      private suspend fun performYouTubeSearch(query: String) {
         if (query.isBlank()) {
-            reduce { it.copy(tracks = emptyList(), filtered = emptyList(), scanning = false) }
+            reduce {
+                it.copy(
+                    tracks = emptyList(),
+                    filtered = emptyList(),
+                    ytSearchedArtists = emptyList(),
+                    scanning = false,
+                )
+            }
             return
         }
         reduce { it.copy(scanning = true) }
         try {
             val results = youtubeRepository.search(query)
+            val artists = youtubeRepository.searchArtists(query)
             indexTracks(results)
             if (currentState.query == query) {
                 reduce {
@@ -211,6 +219,7 @@ class PlayerViewModel @Inject constructor(
                         scanning = false,
                         tracks = results,
                         filtered = results,
+                        ytSearchedArtists = artists,
                     )
                 }
             }
@@ -1019,6 +1028,50 @@ class PlayerViewModel @Inject constructor(
                         notify("no playable tracks in playlist")
                     } else {
                         onIntent(DmtAction.PlayAt(tracks, 0))
+                    }
+                }
+            }
+
+            is DmtAction.OpenYtPlaylist -> {
+                reduce {
+                    it.copy(
+                        view = DmtView.YT_PLAYLIST,
+                        ytDetailLoading = true,
+                        ytPlaylistDetail = dev.abhi.zmt.data.repository.YtPlaylistDetail(
+                            browseId = intent.browseId,
+                            title = intent.title,
+                            coverUrl = intent.coverUrl,
+                        ),
+                    )
+                }
+                viewModelScope.launch {
+                    val detail = withContext(Dispatchers.IO) {
+                        youtubeRepository.getYtPlaylistDetail(intent.browseId, intent.title, intent.coverUrl)
+                    }
+                    reduce {
+                        it.copy(ytPlaylistDetail = detail, ytDetailLoading = false)
+                    }
+                }
+            }
+
+            is DmtAction.OpenYtArtist -> {
+                reduce {
+                    it.copy(
+                        view = DmtView.YT_ARTIST,
+                        ytDetailLoading = true,
+                        ytArtistDetail = dev.abhi.zmt.data.repository.YtArtistDetail(
+                            browseId = intent.browseId,
+                            name = intent.name,
+                            coverUrl = intent.coverUrl,
+                        ),
+                    )
+                }
+                viewModelScope.launch {
+                    val detail = withContext(Dispatchers.IO) {
+                        youtubeRepository.getYtArtistDetail(intent.browseId, intent.name, intent.coverUrl)
+                    }
+                    reduce {
+                        it.copy(ytArtistDetail = detail, ytDetailLoading = false)
                     }
                 }
             }
