@@ -1035,6 +1035,7 @@ class PlayerViewModel @Inject constructor(
             is DmtAction.OpenYtPlaylist -> {
                 reduce {
                     it.copy(
+                        ytPreviousView = if (it.view != DmtView.YT_PLAYLIST) it.view else it.ytPreviousView,
                         view = DmtView.YT_PLAYLIST,
                         ytDetailLoading = true,
                         ytPlaylistDetail = dev.abhi.zmt.data.repository.YtPlaylistDetail(
@@ -1053,10 +1054,10 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
             }
-
             is DmtAction.OpenYtArtist -> {
                 reduce {
                     it.copy(
+                        ytPreviousView = if (it.view == DmtView.LIBRARY) DmtView.LIBRARY else DmtView.HOME,
                         view = DmtView.YT_ARTIST,
                         ytDetailLoading = true,
                         ytArtistDetail = dev.abhi.zmt.data.repository.YtArtistDetail(
