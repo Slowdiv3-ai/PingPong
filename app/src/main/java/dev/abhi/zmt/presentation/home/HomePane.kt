@@ -411,7 +411,7 @@ private fun YoutubeHomeSection(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(ytHome.playlists, key = { it.browseId }) { pl ->
                     YtPlaylistCard(playlist = pl) {
-                        dispatch(DmtAction.PlayYtPlaylist(pl.browseId, pl.title))
+                        dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
                     }
                 }
             }
@@ -441,9 +441,14 @@ private fun YoutubeHomeSection(
                             .width(136.dp)
                             .border(1.dp, TuiLine)
                             .tuiClickable {
-                                dispatch(DmtAction.Query(artist.name))
-                                dispatch(DmtAction.Show(DmtView.LIBRARY))
-                                dispatch(DmtAction.Search)
+                                val bId = artist.browseId
+                                if (bId != null) {
+                                    dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
+                                } else {
+                                    dispatch(DmtAction.Query(artist.name))
+                                    dispatch(DmtAction.Show(DmtView.LIBRARY))
+                                    dispatch(DmtAction.Search)
+                                }
                             }
                             .padding(10.dp),
                     ) {
