@@ -290,7 +290,7 @@ suspend fun radioFor(videoId: String): List<Track> {
         }
     }
 
-    /** Loads full playlist/album/radio details (title, cover, and tracks) for browsing. */
+        /** Loads full playlist/album/radio details (title, cover, and tracks) for browsing. */
     suspend fun getYtPlaylistDetail(
         browseId: String,
         fallbackTitle: String,
@@ -299,11 +299,17 @@ suspend fun radioFor(videoId: String): List<Track> {
         return try {
             val normalizedId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
             val page = Innertube.playlistPage(BrowseBody(browseId = normalizedId))?.getOrNull()
-            val tracks = page?.songsPage?.items?.mapNotNull { it.toTrack() }.orEmpty()
+            val rawTracks = page?.songsPage?.items?.mapNotNull { it.toTrack() }.orEmpty()
             val title = page?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
             val subtitle = page?.description?.takeIf { it.isNotBlank() }
-                ?: "${tracks.size} tracks"
-            val cover = page?.thumbnail?.url ?: fallbackCover ?: tracks.firstOrNull()?.coverUri?.toString()
+                ?: "${rawTracks.size} tracks"
+            val cover = page?.thumbnail?.url ?: fallbackCover ?: rawTracks.firstOrNull()?.coverUri?.toString()
+            val coverUriParsed = cover?.let { Uri.parse(it) }
+            val tracks = if (coverUriParsed != null) {
+                rawTracks.map { t -> if (t.coverUri == null) t.copy(coverUri = coverUriParsed) else t }
+            } else {
+                rawTracks
+            }
             YtPlaylistDetail(
                 browseId = browseId,
                 title = title,
@@ -316,6 +322,7 @@ suspend fun radioFor(videoId: String): List<Track> {
             YtPlaylistDetail(browseId = browseId, title = fallbackTitle, coverUrl = fallbackCover)
         }
     }
+
 
     /** Searches YouTube Music specifically for artist channels so users can click into their profile. */
     suspend fun searchArtists(query: String): List<YtHomeArtist> {
