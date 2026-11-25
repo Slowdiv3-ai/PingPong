@@ -60,15 +60,15 @@ class YoutubeStreamResolver @Inject constructor(
     private val youTubeDLBridge: YouTubeDLBridge,
 ) {
     suspend fun resolve(videoId: String): ResolvedStream? {
+        val ytdl = resolveViaYtDlp(videoId)
+        if (ytdl != null) return ytdl
+
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
             val stream = resolveViaInnertubeContext(videoId, context)
             if (stream != null) return stream
             delay(RETRY_DELAY_MS)
         }
-
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) return ytdl
 
         val piped = resolveViaPiped(videoId)
         if (piped != null) return piped
@@ -111,21 +111,24 @@ class YoutubeStreamResolver @Inject constructor(
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
         val results = mutableListOf<ResolvedStream>()
 
-        // Take the first working Innertube stream (e.g. ANDROID_VR itag=140) instead of waiting 15s for all 5
-        for (context in INNERTUBE_CONTEXTS) {
-            if (!currentCoroutineContext().isActive) break
-            val stream = resolveViaInnertubeContext(videoId, context)
-            if (stream != null) {
-                results.add(stream)
-                break
+        // Try yt-dlp first since it handles YouTube 403/PO-token workarounds cleanly
+        val ytdl = resolveViaYtDlp(videoId)
+        if (ytdl != null) {
+            results.add(ytdl)
+        }
+
+        // Only query Innertube if yt-dlp returned nothing
+        if (results.isEmpty()) {
+            for (context in INNERTUBE_CONTEXTS) {
+                if (!currentCoroutineContext().isActive) break
+                val stream = resolveViaInnertubeContext(videoId, context)
+                if (stream != null) {
+                    results.add(stream)
+                    break
+                }
             }
         }
 
-        // Only run yt-dlp as a fallback if Innertube returned no stream at all
-        if (results.isEmpty()) {
-            val ytdl = resolveViaYtDlp(videoId)
-            if (ytdl != null) results.add(ytdl)
-        }
         Log.d(TAG, "resolveAll($videoId): ${results.size} options")
         return results
     }
