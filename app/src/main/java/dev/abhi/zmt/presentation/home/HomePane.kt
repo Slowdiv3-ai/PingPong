@@ -55,6 +55,7 @@ import dev.abhi.zmt.ui.theme.TuiDim
 import dev.abhi.zmt.ui.theme.TuiFg
 import dev.abhi.zmt.ui.theme.TuiLine
 import dev.abhi.zmt.ui.theme.TuiRaised
+import dev.abhi.zmt.core.common.TuiKey
 
 @Composable
 fun HomePane(
