@@ -61,7 +61,7 @@ class YoutubeStreamResolver @Inject constructor(
 ) {
     private val urlCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, ResolvedStream>>()
 
-    private fun getCachedStream(videoId: String): ResolvedStream? {
+    fun getCachedStream(videoId: String): ResolvedStream? {
         val entry = urlCache[videoId] ?: return null
         if (System.currentTimeMillis() - entry.first > 30 * 60 * 1000L) {
             urlCache.remove(videoId)
@@ -70,29 +70,44 @@ class YoutubeStreamResolver @Inject constructor(
         return entry.second
     }
 
-    suspend fun resolve(videoId: String): ResolvedStream? {
-        getCachedStream(videoId)?.let { return it }
+    fun cacheStream(videoId: String, stream: ResolvedStream) {
+        urlCache[videoId] = System.currentTimeMillis() to stream
+    }
 
-        val ytdl = resolveViaYtDlp(videoId)
-        if (ytdl != null) {
-            urlCache[videoId] = System.currentTimeMillis() to ytdl
-            return ytdl
-        }
-
-
+    suspend fun resolveViaInnertubeFast(videoId: String): ResolvedStream? {
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
             val stream = resolveViaInnertubeContext(videoId, context)
             if (stream != null) return stream
-            delay(RETRY_DELAY_MS)
+        }
+        return null
+    }
+
+    suspend fun resolve(videoId: String): ResolvedStream? {
+        getCachedStream(videoId)?.let { return it }
+
+        // 1. Fast native Innertube (~0.3s)
+        resolveViaInnertubeFast(videoId)?.let {
+            cacheStream(videoId, it)
+            return it
         }
 
-        val piped = resolveViaPiped(videoId)
-        if (piped != null) return piped
+        // 2. Fast Piped fallback
+        resolveViaPiped(videoId)?.let {
+            cacheStream(videoId, it)
+            return it
+        }
+
+        // 3. Slow yt-dlp last resort (3-5s)
+        resolveViaYtDlp(videoId)?.let {
+            cacheStream(videoId, it)
+            return it
+        }
 
         Log.e(TAG, "All resolvers failed for $videoId")
         return null
     }
+
     private suspend fun resolveViaPiped(videoId: String): ResolvedStream? {
         for (instance in PIPED_INSTANCES) {
             if (!currentCoroutineContext().isActive) return null
