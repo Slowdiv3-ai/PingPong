@@ -69,9 +69,12 @@ class StreamCacheManager @Inject constructor(
                     conn.setRequestProperty("User-Agent", userAgent)
                     conn.setRequestProperty("Accept", "*/*")
                     conn.setRequestProperty("Range", "bytes=0-")
+                    if (url.contains("c=WEB")) {
                     conn.setRequestProperty("Origin", "https://youtube.com")
-                    conn.setRequestProperty("Referer", "https://youtube.com/")
+                    conn.setRequestProperty("Referer", "https://youtube.com")
+                    }
                     conn.connect()
+
 
                     val total = conn.contentLength
                     val input = conn.inputStream
