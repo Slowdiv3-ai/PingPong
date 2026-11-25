@@ -153,8 +153,11 @@ fun DmtScreen(
             state.view == DmtView.PLAYLISTS && state.openPlaylist != null ->
                 dispatch(DmtAction.OpenPlaylist(null))
 
-            state.view == DmtView.YT_PLAYLIST || state.view == DmtView.YT_ARTIST ->
-                dispatch(DmtAction.Show(DmtView.HOME))
+            state.view == DmtView.YT_PLAYLIST ->
+                dispatch(DmtAction.Show(state.ytPreviousView))
+
+            state.view == DmtView.YT_ARTIST ->
+                dispatch(DmtAction.Show(if (state.ytPreviousView == DmtView.LIBRARY) DmtView.LIBRARY else DmtView.HOME))
 
             else -> dispatch(DmtAction.Show(if (state.view == DmtView.LIBRARY) DmtView.HOME else DmtView.LIBRARY))
             
