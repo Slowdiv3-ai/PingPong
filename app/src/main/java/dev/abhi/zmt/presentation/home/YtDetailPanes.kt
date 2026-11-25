@@ -89,7 +89,7 @@ fun YtPlaylistDetailPane(
                     .padding(top = 8.dp, bottom = 12.dp),
             ) {
                 TuiKey(label = "[ < back ]") {
-                    dispatch(DmtAction.Show(DmtView.HOME))
+                    dispatch(DmtAction.Show(state.ytPreviousView))
                 }
             }
 
