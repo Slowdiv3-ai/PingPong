@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.abhi.zmt.core.common.OdometerTimeText
 import dev.abhi.zmt.core.common.CursorTitle
 import dev.abhi.zmt.core.common.Hairline
 import dev.abhi.zmt.core.common.TuiKey
@@ -96,13 +97,37 @@ fun MiniPlayer(
                 )
                 val position = state.positionMs.asTime()
                 val duration = state.durationMs.asTime()
-                Text(
-                    text = state.fault ?: "${state.artist.asCredit()} · $position/$duration".lowercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (state.fault != null) TuiRed else TuiDim,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (state.fault != null) {
+                    Text(
+                        text = state.fault,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TuiRed,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${state.artist.asCredit()} · ".lowercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TuiDim,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        OdometerTimeText(
+                            time = position,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TuiDim,
+                        )
+                        Text(
+                            text = "/$duration",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TuiDim,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
             Text(
                 text = "^",
