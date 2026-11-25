@@ -126,6 +126,7 @@ class PlayerViewModel @Inject constructor(
     private val downloadManager: dev.abhi.zmt.data.remote.download.TrackDownloadManager,
     private val streamCache: dev.abhi.zmt.playback.StreamCacheManager,
     private val youtubeStreamResolver: dev.abhi.zmt.data.remote.youtube.YoutubeStreamResolver,
+    private val streamExtensionEngine: dev.abhi.zmt.data.remote.youtube.StreamExtensionEngine,
     private val playbackCache: PlaybackCache,
     private val telegramClient: dev.abhi.zmt.data.remote.telegram.TelegramClient,
     private val playlistImporter: PlaylistImporter,
@@ -1282,49 +1283,64 @@ class PlayerViewModel @Inject constructor(
 
         // Cancel any previous download and stop old audio immediately while loading the new track
         rawPlayer.stop()
+        val trackTitle = currentState.currentTrack?.title
+            ?: controller?.currentMediaItem?.mediaMetadata?.title?.toString()
+        val trackArtist = currentState.currentTrack?.artist
+            ?: controller?.currentMediaItem?.mediaMetadata?.artist?.toString()
+
         resolveJob = viewModelScope.launch {
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
-            val cachedFile = withContext(Dispatchers.IO) {
-                streamCache.downloadSync(
+            var startedPlayback = false
+
+            val finishedFile = withContext(Dispatchers.IO) {
+                streamCache.downloadProgressive(
                     streamUri = uriStr,
                     resolveUrl = {
-                        youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) }
-                    }
-                ) ?: streamCache.downloadSync(
-                    streamUri = uriStr,
-                    resolveUrl = {
-                        youtubeStreamResolver.resolveViaYtDlp(videoId)?.let { Pair(it.url, it.userAgent) }
+                        streamExtensionEngine.resolveFast(videoId, trackTitle, trackArtist)
+                            ?.let { Pair(it.url, it.userAgent) }
+                    },
+                    onHeadStartReady = { partialFile ->
+                        if (currentTrackUri != uri || startedPlayback) return@downloadProgressive
+                        startedPlayback = true
+                        val partialUri = Uri.fromFile(partialFile)
+                        viewModelScope.launch(Dispatchers.Main) {
+                            if (currentTrackUri != uri) return@launch
+                            if (controller?.playWhenReady == true || controller?.isPlaying == true) {
+                                rawPlayer.isExoPlaying = true
+                            }
+                            rawPlayer.playUri(
+                                context,
+                                partialUri,
+                                startTimeMs,
+                                crossfadeSeconds,
+                                null,
+                                onError = { err ->
+                                    Log.e("RawAudioPlayer", "DSP playback failed ($err)")
+                                    onError(err)
+                                },
+                                onSuccess = onSuccess
+                            )
+                        }
                     }
                 )
             }
-            // Ignore if user already skipped to another track while downloading
+
             if (currentTrackUri != uri) return@launch
-            if (cachedFile == null) {
-                Log.e("RawAudioPlayer", "Download/resolve failed for $videoId")
-                onError("Could not load YouTube stream for $videoId")
+            if (finishedFile == null && !startedPlayback) {
+                Log.e("RawAudioPlayer", "All stream extensions failed for $videoId")
+                onError("Could not load stream for $videoId")
                 return@launch
             }
-            val fileUri = Uri.fromFile(cachedFile)
-            currentTrackUri = fileUri
-            currentTrackHeaders = null
-            syncExoToLocalFile(fileUri, startTimeMs)
-            if (controller?.playWhenReady == true || controller?.isPlaying == true) {
-                rawPlayer.isExoPlaying = true
+
+            // Once full file is saved on disk, point currentTrackUri & ExoPlayer timeline to it
+            if (finishedFile != null) {
+                val finalUri = Uri.fromFile(finishedFile)
+                currentTrackUri = finalUri
+                currentTrackHeaders = null
+                syncExoToLocalFile(finalUri, controller?.currentPosition ?: startTimeMs)
             }
-            rawPlayer.playUri(
-                context,
-                fileUri,
-                startTimeMs,
-                crossfadeSeconds,
-                null,
-                onError = { err ->
-                    Log.e("RawAudioPlayer", "DSP playback failed ($err), unmuting ExoPlayer fallback")
-                    onError(err)
-                },
-                onSuccess = onSuccess
-            )
         }
-    }
+
  
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
