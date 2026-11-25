@@ -52,12 +52,14 @@ import dev.abhi.zmt.R
 import dev.abhi.zmt.audio.RawAudioPlayer // <--- ADDED IMPORT
 import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.FitScaled
+import dev.abhi.zmt.core.common.PacmanLoader
 import dev.abhi.zmt.core.common.ScrollMemory
 import dev.abhi.zmt.core.common.TuiNotice
 import dev.abhi.zmt.core.common.TuiTab
 import dev.abhi.zmt.core.common.fitScaleFor
 import dev.abhi.zmt.core.common.isLandscapeWindow
 import dev.abhi.zmt.domain.model.Track
+import dev.abhi.zmt.domain.model.TrackSource
 import dev.abhi.zmt.presentation.home.HomePane
 import dev.abhi.zmt.presentation.home.YtArtistDetailPane
 import dev.abhi.zmt.presentation.home.YtPlaylistDetailPane
@@ -208,6 +210,24 @@ fun DmtScreen(
             ) {
                 Titlebar(state, dispatch)
                 TabsRow(state, dispatch)
+                val routeSlug = when (state.view) {
+                    DmtView.HOME -> "home"
+                    DmtView.LIBRARY -> if (state.sourceFilter == TrackSource.YOUTUBE) "yt/search" else "local/library"
+                    DmtView.PLAYLISTS -> "playlists"
+                    DmtView.IMPORTED -> "imported"
+                    DmtView.SOURCES -> "sources"
+                    DmtView.SETTINGS -> "config"
+                    DmtView.YT_PLAYLIST -> "yt/playlist"
+                    DmtView.YT_ARTIST -> "yt/artist"
+                    else -> state.view.name.lowercase()
+                }
+                TuiTypingText(
+                    text = "pingpong@arch:~$ cd /$routeSlug",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TuiDim,
+                    charDelayMs = 14L,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
                 PaneHost(
                     state = state,
                     dispatch = dispatch,
@@ -401,7 +421,7 @@ private fun PaneHost(
                 state.view == DmtView.SOURCES -> SourcesPane(state, dispatch)
                 state.view == DmtView.SOURCE_LOGIN -> SourceLoginPane(mode = state.loginSource, state = state, dispatch = dispatch)
                 state.scanning && state.tracks.isEmpty() ->
-                    Caption(stringResource(R.string.scanning))
+                PacmanLoader(label = "scanning library")
 
                 state.view == DmtView.ALBUMS -> AlbumsPane(state, dispatch)
                 state.view == DmtView.ARTISTS -> ArtistsPane(state, dispatch)
@@ -431,13 +451,12 @@ private fun SideRail(state: DmtState, dispatch: (DmtAction) -> Unit) {
             Box(
                 modifier = Modifier
                     .size(9.dp)
-                    .background(TuiAccent),
-            )
-            Text(
-                text = " " + stringResource(R.string.app_name),
-                style = MaterialTheme.typography.titleMedium,
-                color = TuiBright,
-            )
+        TuiTypingText(
+            text = " " + stringResource(R.string.app_name) + " ",
+            style = MaterialTheme.typography.titleMedium,
+            color = TuiBright,
+            charDelayMs = 28L,
+        )
         }
         HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 8.dp))
 
