@@ -15,6 +15,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -163,6 +170,84 @@ fun OdometerTimeText(
                 )
             }
         }
+    }
+}
+@Composable
+fun PacmanSeekBar(
+    fraction: Float,
+    isPlaying: Boolean,
+    onScrub: (Float?) -> Unit,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val infinite = rememberInfiniteTransition(label = "seekPacman")
+    val mouth by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 240, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "seekMouth",
+    )
+    val pacChar = if (isPlaying && mouth > 0.5f) "c" else "C"
+
+    BoxWithConstraints(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val f = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    onSeek(f)
+                }
+            }
+            .pointerInput(Unit) {
+                var dragFraction = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        dragFraction = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        onScrub(dragFraction)
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        dragFraction = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        onScrub(dragFraction)
+                    },
+                    onDragEnd = {
+                        onSeek(dragFraction)
+                    },
+                    onDragCancel = {
+                        onScrub(null)
+                    },
+                )
+            },
+    ) {
+        // Fit slots cleanly to the available width (~7.5dp per monospace char at labelSmall)
+        val slots = ((maxWidth.value / 7.6f).toInt() - 2).coerceIn(12, 34)
+        val clamped = fraction.coerceIn(0f, 1f)
+        val pacIndex = (clamped * (slots - 1)).toInt().coerceIn(0, slots - 1)
+
+        val bar = buildAnnotatedString {
+            withStyle(SpanStyle(color = TuiDim)) { append("[") }
+            for (i in 0 until slots) {
+                when {
+                    i < pacIndex -> withStyle(SpanStyle(color = TuiFaint)) { append("-") }
+                    i == pacIndex -> withStyle(SpanStyle(color = TuiAccent, fontWeight = FontWeight.Bold)) { append(pacChar) }
+                    i % 2 == 0 -> withStyle(SpanStyle(color = TuiBright)) { append("•") }
+                    else -> append(" ")
+                }
+            }
+            withStyle(SpanStyle(color = TuiDim)) { append("]") }
+        }
+
+        Text(
+            text = bar,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
