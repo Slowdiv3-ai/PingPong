@@ -162,11 +162,10 @@ class YoutubeStreamResolver @Inject constructor(
             if (response.formats != null) {
                 val validFormats = response.formats.filter { fmt ->
                     val id = fmt.formatId.orEmpty()
-                    val acodec = fmt.acodec.orEmpty()
+                    val ext = fmt.ext.orEmpty()
                     fmt.url != null &&
                         !id.startsWith("sb") &&
-                        acodec != "none" &&
-                        acodec.isNotBlank()
+                        ext != "mhtml"
                 }
                 val audioFormats = validFormats.filter { it.isAudioOnly }
                 val bestAudio = audioFormats.maxByOrNull { it.audioBitrate ?: 0.0 }
