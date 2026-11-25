@@ -60,6 +60,7 @@ import dev.abhi.zmt.R
 import dev.abhi.zmt.core.common.AsciiCover
 import dev.abhi.zmt.core.common.CursorTitle
 import dev.abhi.zmt.core.common.FitScaled
+import dev.abhi.zmt.core.common.PacmanLoader
 import dev.abhi.zmt.core.common.ThinSlider
 import dev.abhi.zmt.core.common.TuiChip
 import dev.abhi.zmt.core.common.TuiKey
@@ -472,26 +473,40 @@ private fun ArtSlot(
     modifier: Modifier = Modifier,
 ) {
     val lyrics = state.lyrics
-    if (showLyrics && lyrics != null) {
-        val aspect = state.cover?.let { it.width.toFloat() / it.height } ?: 1f
-        LyricsPanel(
-            lyrics = lyrics,
-            trackId = state.nowPlayingId,
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            isPlaying = state.isPlaying,
-            romanized = state.settings.romanizedLyrics,
-            contentAspect = aspect,
-            onSeekFraction = {
-                dispatch(DmtAction.Seek(it))
-                if (!state.isPlaying) dispatch(DmtAction.TogglePlay)
-            },
-            modifier = modifier,
-        )
-    } else {
-        CoverPanel(state, modifier)
+    when {
+        state.lyricsFetching -> {
+            TuiPanel(modifier = modifier) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp),
+                ) {
+                    PacmanLoader(label = "fetching lyrics")
+                }
+            }
+        }
+        showLyrics && lyrics != null -> {
+            val aspect = state.cover?.let { it.width.toFloat() / it.height } ?: 1f
+            LyricsPanel(
+                lyrics = lyrics,
+                trackId = state.nowPlayingId,
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                isPlaying = state.isPlaying,
+                romanized = state.settings.romanizedLyrics,
+                contentAspect = aspect,
+                onSeekFraction = {
+                    dispatch(DmtAction.Seek(it))
+                    if (!state.isPlaying) dispatch(DmtAction.TogglePlay)
+                },
+                modifier = modifier,
+            )
+        }
+        else -> CoverPanel(state, modifier)
     }
 }
+
 
 @Composable
 private fun CoverPanel(state: DmtState, modifier: Modifier = Modifier) {
