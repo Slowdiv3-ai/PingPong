@@ -12,7 +12,10 @@ import dev.abhi.zmt.domain.model.Genre
 import dev.abhi.zmt.domain.model.HomeShelves
 import dev.abhi.zmt.lyrics.Lyrics
 import dev.abhi.zmt.domain.model.Playlist
+import dev.abhi.zmt.data.repository.YtArtistDetail
+import dev.abhi.zmt.data.repository.YtHomeArtist
 import dev.abhi.zmt.data.repository.YtHomeFeed
+import dev.abhi.zmt.data.repository.YtPlaylistDetail
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Spec
 import dev.abhi.zmt.domain.model.Track
@@ -22,7 +25,7 @@ enum class LibrarySection { ALL, RECENT, PLAYED }
 
 enum class DmtView {
     HOME, LIBRARY, ALBUMS, ARTISTS, GENRES, FOLDERS, PLAYLISTS, SETTINGS, STATS, BLOCKLIST,
-    SOURCES, SOURCE_LOGIN, PERMISSIONS, IMPORTED
+    SOURCES, SOURCE_LOGIN, PERMISSIONS, IMPORTED, YT_PLAYLIST, YT_ARTIST
 }
 
 data class DmtState(
@@ -76,6 +79,10 @@ data class DmtState(
     val home: HomeShelves = HomeShelves(),
     val ytHome: YtHomeFeed = YtHomeFeed(),
     val ytHomeLoading: Boolean = false,
+    val ytPlaylistDetail: YtPlaylistDetail? = null,
+    val ytArtistDetail: YtArtistDetail? = null,
+    val ytDetailLoading: Boolean = false,
+    val ytSearchedArtists: List<YtHomeArtist> = emptyList(),
     val tech: List<Spec> = emptyList(),
     val route: List<Spec> = emptyList(),
     val fault: String? = null,
@@ -172,6 +179,8 @@ sealed interface DmtAction {
     data class ImportPlaylistFromUrl(val url: String) : DmtAction
     data class PlaylistImported(val message: String) : DmtAction
     data class PlayYtPlaylist(val browseId: String, val title: String) : DmtAction
+    data class OpenYtPlaylist(val browseId: String, val title: String, val coverUrl: String? = null) : DmtAction
+    data class OpenYtArtist(val browseId: String, val name: String, val coverUrl: String? = null) : DmtAction
     data object RefreshYtHome : DmtAction
 }
 
