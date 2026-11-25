@@ -57,6 +57,8 @@ import dev.abhi.zmt.core.common.fitScaleFor
 import dev.abhi.zmt.core.common.isLandscapeWindow
 import dev.abhi.zmt.domain.model.Track
 import dev.abhi.zmt.presentation.home.HomePane
+import dev.abhi.zmt.presentation.home.YtArtistDetailPane
+import dev.abhi.zmt.presentation.home.YtPlaylistDetailPane
 import dev.abhi.zmt.presentation.library.AlbumsPane
 import dev.abhi.zmt.presentation.library.ArtistsPane
 import dev.abhi.zmt.presentation.library.FoldersPane
@@ -147,11 +149,15 @@ fun DmtScreen(
 
             state.view == DmtView.FOLDERS && state.openFolder != null ->
                 dispatch(DmtAction.OpenFolder(null))
-
+                
             state.view == DmtView.PLAYLISTS && state.openPlaylist != null ->
                 dispatch(DmtAction.OpenPlaylist(null))
 
+            state.view == DmtView.YT_PLAYLIST || state.view == DmtView.YT_ARTIST ->
+                dispatch(DmtAction.Show(DmtView.HOME))
+
             else -> dispatch(DmtAction.Show(if (state.view == DmtView.LIBRARY) DmtView.HOME else DmtView.LIBRARY))
+            
         }
     }
 
@@ -398,6 +404,8 @@ private fun PaneHost(
                 state.view == DmtView.FOLDERS -> FoldersPane(state, dispatch)
                 state.view == DmtView.PLAYLISTS -> PlaylistsPane(state, dispatch)
                 state.view == DmtView.IMPORTED -> ImportedPane(state, dispatch)
+                state.view == DmtView.YT_PLAYLIST -> YtPlaylistDetailPane(state, dispatch, art)
+                state.view == DmtView.YT_ARTIST -> YtArtistDetailPane(state, dispatch, art)
                 else -> LibraryPane(state, dispatch)
             }
         }
