@@ -50,7 +50,11 @@ import dev.abhi.zmt.ui.theme.TuiFg
 import dev.abhi.zmt.util.asTime
 
 @Composable
-fun LibraryPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
+fun LibraryPane(
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    art: suspend (Track) -> Bitmap = { Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888) },
+) {
     val isYouTube = state.settings.sourceMode == SourceMode.YOUTUBE
 
     Column {
@@ -201,15 +205,19 @@ fun LibraryPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
 
         if (isYouTube && state.ytSearchedArtists.isNotEmpty()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = 8.dp),
             ) {
                 state.ytSearchedArtists.forEach { artist ->
                     val bId = artist.browseId ?: return@forEach
-                    TuiKey(label = "[ artist: ${artist.name.lowercase()} ]") {
+                    SearchArtistCard(
+                        artist = artist,
+                        art = art,
+                        artKey = state.settings.rawArt,
+                    ) {
                         dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
                     }
                 }
