@@ -39,7 +39,7 @@ fun TuiTypingText(
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyMedium,
     color: Color = TuiBright,
-    charDelayMs: Long = 14L,
+    charDelayMs: Long = 38L,
     showCursor: Boolean = true,
     maxLines: Int = 1,
 ) {
