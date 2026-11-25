@@ -127,6 +127,7 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var preferencesRepository: PreferencesRepository
     @Inject lateinit var streamCache: StreamCacheManager
     @Inject lateinit var youtubeStreamResolver: YoutubeStreamResolver
+    @Inject lateinit var streamExtensionEngine: dev.abhi.zmt.data.remote.youtube.StreamExtensionEngine
     @Inject lateinit var offlineCacheDataSourceFactory: OfflineCacheDataSourceFactory
 
     companion object {
@@ -572,7 +573,10 @@ class PlaybackService : MediaLibraryService() {
                 streamCache.cacheInBackground(nextUri) {
                     val videoId = nextUri.removePrefix("youtube://video/")
                     if (videoId.isNotBlank() && videoId != nextUri) {
-                        youtubeStreamResolver.resolveViaYtDlp(videoId)?.let { Pair(it.url, it.userAgent) }
+                        val title = nextItem.mediaMetadata.title?.toString()
+                        val artist = nextItem.mediaMetadata.artist?.toString()
+                        streamExtensionEngine.resolveFast(videoId, title, artist)
+                            ?.let { Pair(it.url, it.userAgent) }
                     } else null
                 }
             }
