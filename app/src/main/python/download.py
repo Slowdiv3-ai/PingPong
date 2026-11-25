@@ -15,7 +15,7 @@ def download(quickjs_bin: str, video_id: str) -> str:
     """
     opts = {
         # Strictly grab audio-only streams (m4a or webm) instead of 16MB MP4 videos
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[vcodec=none]/bestaudio",
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
