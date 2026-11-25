@@ -38,6 +38,7 @@ data class PlayerResponse(
 
     @Serializable
     data class StreamingData(
+        val formats: List<AdaptiveFormat>? = null,
         val adaptiveFormats: List<AdaptiveFormat>?,
         val expiresInSeconds: Long?
     ) {
