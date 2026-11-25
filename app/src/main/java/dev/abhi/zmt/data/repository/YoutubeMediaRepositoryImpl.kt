@@ -104,19 +104,29 @@ class YoutubeMediaRepositoryImpl @Inject constructor(
         }
     }
 
-    /** Fetches similar/radio tracks for a YouTube videoId using Innertube automix. */
-    suspend fun radioFor(videoId: String): List<Track> {
-        return try {
-            val next = Innertube.nextPage(NextBody(videoId = videoId))?.getOrNull()
-            val items = next?.itemsPage?.items.orEmpty()
-            items
-                .mapNotNull { it.toTrack() }
-                .filter { it.remoteId != videoId }
-        } catch (e: Exception) {
-            Log.e(TAG, "Radio fetch failed for '$videoId': ${e.message}")
-            emptyList()
-        }
+    /** Fetches similar/radio tracks for a YouTube videoId using YouTube Music studio automix. */
+suspend fun radioFor(videoId: String): List<Track> {
+    return try {
+        // Use RDAMVM prefix to request YouTube Music studio audio tracks instead of video mixes
+        val next = Innertube.nextPage(
+            NextBody(
+                videoId = videoId,
+                playlistId = "RDAMVM$videoId"
+            )
+        )?.getOrNull() ?: Innertube.nextPage(NextBody(videoId = videoId))?.getOrNull()
+
+        val items = next?.itemsPage?.items.orEmpty()
+        items
+            .mapNotNull { it.toTrack() }
+            .filter { it.remoteId != videoId }
+    } catch (e: Exception) {
+        Log.e(TAG, "Radio fetch failed for '$videoId': ${e.message}")
+        emptyList()
     }
+}
+
+
+    
     /** Fetches trending/explore songs for the YouTube Home feed. */
     suspend fun trendingSongs(): List<Track> {
         return try {
