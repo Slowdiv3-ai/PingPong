@@ -416,6 +416,18 @@ private fun YoutubeHomeSection(
                 }
             }
         }
+        ytHome.shelves.forEach { shelf ->
+            ShelfHeader(label = shelf.title) {
+                dispatch(DmtAction.Show(DmtView.LIBRARY))
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(shelf.playlists, key = { "${shelf.title}_${it.browseId}" }) { pl ->
+                    YtPlaylistCard(playlist = pl) {
+                        dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
+                    }
+                }
+            }
+        }
 
         if (ytHome.tracks.isNotEmpty()) {
             ShelfHeader(label = "recommended tracks") {
