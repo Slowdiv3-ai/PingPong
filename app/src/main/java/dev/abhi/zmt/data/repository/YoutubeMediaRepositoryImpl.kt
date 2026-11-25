@@ -173,10 +173,11 @@ suspend fun radioFor(videoId: String): List<Track> {
                                 browse?.browseId != null && (browse.browseId.startsWith("VL") || browse.browseId.startsWith("MPRE") || browse.browseId.startsWith("RD")) -> {
                                     playlists.add(YtHomePlaylist(browse.browseId, title, subtitle, thumb))
                                 }
-                                browse?.browseId != null && browse.browseId.startsWith("UC") -> {
+                                    browse?.browseId != null && browse.browseId.startsWith("UC") -> {
                                     artists.add(YtHomeArtist(title, browse.browseId, thumb))
                                 }
                             }
+                        } // <-- ADD THIS MISSING CLOSING BRACE
 
                         val listItem = item.musicResponsiveListItemRenderer
                         if (listItem != null) {
