@@ -409,7 +409,7 @@ private fun PaneHost(
                 state.view == DmtView.IMPORTED -> ImportedPane(state, dispatch)
                 state.view == DmtView.YT_PLAYLIST -> YtPlaylistDetailPane(state, dispatch, art)
                 state.view == DmtView.YT_ARTIST -> YtArtistDetailPane(state, dispatch, art)
-                else -> LibraryPane(state, dispatch)
+                else -> LibraryPane(state, dispatch, art)
             }
         }
     }
