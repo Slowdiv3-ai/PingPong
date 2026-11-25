@@ -1,6 +1,7 @@
 package dev.abhi.zmt.presentation.home
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -35,11 +36,13 @@ import dev.abhi.zmt.core.common.Caption
 import dev.abhi.zmt.core.common.tuiClickable
 import androidx.compose.runtime.LaunchedEffect
 import dev.abhi.zmt.data.repository.YtHomePlaylist
+import dev.abhi.zmt.data.repository.YtHomeArtist
 import dev.abhi.zmt.domain.model.Album
 import dev.abhi.zmt.domain.model.Playlist
 import dev.abhi.zmt.domain.model.Artist
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Track
+import dev.abhi.zmt.domain.model.TrackSource
 import dev.abhi.zmt.domain.model.asCredit
 import dev.abhi.zmt.presentation.player.DmtView
 import dev.abhi.zmt.presentation.library.artistLine2
@@ -410,9 +413,14 @@ private fun YoutubeHomeSection(
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(ytHome.playlists, key = { it.browseId }) { pl ->
-                    YtPlaylistCard(playlist = pl) {
+                    YtPlaylistCard(
+                        playlist = pl,
+                        art = art,
+                        artKey = state.settings.rawArt,
+                    ) {
                         dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
                     }
+
                 }
             }
         }
@@ -422,7 +430,11 @@ private fun YoutubeHomeSection(
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(shelf.playlists, key = { "${shelf.title}_${it.browseId}" }) { pl ->
-                    YtPlaylistCard(playlist = pl) {
+                     YtPlaylistCard(
+                        playlist = pl,
+                        art = art,
+                        artKey = state.settings.rawArt,
+                    ) {
                         dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
                     }
                 }
@@ -448,35 +460,19 @@ private fun YoutubeHomeSection(
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(ytHome.artists, key = { it.name }) { artist ->
-                    Column(
-                        modifier = Modifier
-                            .width(136.dp)
-                            .border(1.dp, TuiLine)
-                            .tuiClickable {
-                                val bId = artist.browseId
-                                if (bId != null) {
-                                    dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
-                                } else {
-                                    dispatch(DmtAction.Query(artist.name))
-                                    dispatch(DmtAction.Show(DmtView.LIBRARY))
-                                    dispatch(DmtAction.Search)
-                                }
-                            }
-                            .padding(10.dp),
+                    YtArtistCard(
+                        artist = artist,
+                        art = art,
+                        artKey = state.settings.rawArt,
                     ) {
-                        Text(
-                            text = artist.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TuiBright,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = "tap to explore",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TuiDim,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                        val bId = artist.browseId
+                        if (bId != null) {
+                            dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
+                        } else {
+                            dispatch(DmtAction.Query(artist.name))
+                            dispatch(DmtAction.Show(DmtView.LIBRARY))
+                            dispatch(DmtAction.Search)
+                        }
                     }
                 }
             }
@@ -502,41 +498,136 @@ private fun YoutubeHomeSection(
         Spacer(modifier = Modifier.height(12.dp))
     }
 }
-
 @Composable
 private fun YtPlaylistCard(
     playlist: YtHomePlaylist,
+    art: suspend (Track) -> Bitmap,
+    artKey: Any,
     onClick: () -> Unit,
 ) {
+    val cover by produceState<Bitmap?>(initialValue = null, playlist.browseId, playlist.coverUrl, artKey) {
+        val url = playlist.coverUrl ?: return@produceState
+        val seed = Track(
+            id = playlist.browseId.hashCode().toLong(),
+            uri = Uri.parse("youtube://playlist/${playlist.browseId}"),
+            title = playlist.title,
+            artist = playlist.subtitle,
+            album = playlist.title,
+            path = "",
+            durationMs = 0L,
+            mime = "audio/mp4",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = 0L,
+            dateModified = 0L,
+            coverUri = Uri.parse(url),
+            source = TrackSource.YOUTUBE,
+        )
+        value = runCatching { art(seed) }.getOrNull()
+    }
     Column(
         modifier = Modifier
             .width(148.dp)
             .border(1.dp, TuiLine)
-            .background(TuiRaised)
-            .tuiClickable(onClick)
-            .padding(10.dp),
+            .tuiClickable(onClick),
     ) {
-        Text(
-            text = "[ playlist ]",
-            style = MaterialTheme.typography.labelSmall,
-            color = TuiDim,
-        )
-        Spacer(modifier = Modifier.height(18.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(TuiRaised),
+        ) {
+            if (cover != null) {
+                AsciiCover(cover = cover!!, playing = false, wave = false)
+            } else {
+                Text("[ playlist ]", style = MaterialTheme.typography.labelSmall, color = TuiDim)
+            }
+        }
         Text(
             text = playlist.title,
             style = MaterialTheme.typography.bodyMedium,
             color = TuiBright,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 6.dp),
         )
         Text(
             text = playlist.subtitle.lowercase().ifBlank { "youtube music" },
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = TuiDim,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp, bottom = 8.dp),
         )
     }
 }
+@Composable
+private fun YtArtistCard(
+    artist: YtHomeArtist,
+    art: suspend (Track) -> Bitmap,
+    artKey: Any,
+    onClick: () -> Unit,
+) {
+    val cover by produceState<Bitmap?>(initialValue = null, artist.name, artist.coverUrl, artKey) {
+        val url = artist.coverUrl ?: return@produceState
+        val seed = Track(
+            id = (artist.browseId ?: artist.name).hashCode().toLong(),
+            uri = Uri.parse("youtube://artist/${artist.browseId ?: artist.name}"),
+            title = artist.name,
+            artist = artist.name,
+            album = "",
+            path = "",
+            durationMs = 0L,
+            mime = "audio/mp4",
+            bitrate = 0,
+            size = 0L,
+            trackNumber = 0,
+            dateAdded = 0L,
+            dateModified = 0L,
+            coverUri = Uri.parse(url),
+            source = TrackSource.YOUTUBE,
+        )
+        value = runCatching { art(seed) }.getOrNull()
+    }
+    Column(
+        modifier = Modifier
+            .width(148.dp)
+            .border(1.dp, TuiLine)
+            .tuiClickable(onClick),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(TuiRaised),
+        ) {
+            if (cover != null) {
+                AsciiCover(cover = cover!!, playing = false, wave = false)
+            } else {
+                Text("[ artist ]", style = MaterialTheme.typography.labelSmall, color = TuiDim)
+            }
+        }
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TuiBright,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 6.dp),
+        )
+        Text(
+            text = "artist",
+            style = MaterialTheme.typography.labelMedium,
+            color = TuiDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp, bottom = 8.dp),
+        )
+    }
+}
+
+
 
