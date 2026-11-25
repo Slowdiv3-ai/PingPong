@@ -199,6 +199,23 @@ fun LibraryPane(state: DmtState, dispatch: (DmtAction) -> Unit) {
             )
         }
 
+        if (isYouTube && state.ytSearchedArtists.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 6.dp),
+            ) {
+                state.ytSearchedArtists.forEach { artist ->
+                    val bId = artist.browseId ?: return@forEach
+                    TuiKey(label = "[ artist: ${artist.name.lowercase()} ]") {
+                        dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
+                    }
+                }
+            }
+        }
+
         LazyColumn {
             itemsIndexed(state.filtered, key = { _, track -> track.id }) { index, track ->
                 val selected = track.id.toString() in state.selectedTrackIds
