@@ -111,18 +111,20 @@ class YoutubeStreamResolver @Inject constructor(
     suspend fun resolveAll(videoId: String): List<ResolvedStream> {
         val results = mutableListOf<ResolvedStream>()
 
+        // Take the first working Innertube stream (e.g. ANDROID_VR itag=140) instead of waiting 15s for all 5
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) break
             val stream = resolveViaInnertubeContext(videoId, context)
-            if (stream != null && results.none { it.url == stream.url }) {
+            if (stream != null) {
                 results.add(stream)
+                break
             }
-            delay(RETRY_DELAY_MS)
         }
 
-        if (results.isEmpty()) {
-            val ytdl = resolveViaYtDlp(videoId)
-            if (ytdl != null) results.add(ytdl)
+        // Always include yt-dlp as an immediate fallback in case Innertube's URL returns 403
+        val ytdl = resolveViaYtDlp(videoId)
+        if (ytdl != null && results.none { it.url == ytdl.url }) {
+            results.add(ytdl)
         }
 
         Log.d(TAG, "resolveAll($videoId): ${results.size} options")
