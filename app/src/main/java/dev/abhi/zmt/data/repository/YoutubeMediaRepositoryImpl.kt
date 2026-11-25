@@ -34,8 +34,14 @@ data class YtHomeArtist(
     val coverUrl: String?,
 )
 
+data class YtHomeShelf(
+    val title: String,
+    val playlists: List<YtHomePlaylist>,
+)
+
 data class YtHomeFeed(
     val playlists: List<YtHomePlaylist> = emptyList(),
+    val shelves: List<YtHomeShelf> = emptyList(),
     val tracks: List<Track> = emptyList(),
     val artists: List<YtHomeArtist> = emptyList(),
 )
@@ -267,8 +273,21 @@ suspend fun radioFor(videoId: String): List<Track> {
                     }
             }
 
+            val shelves = listOf("trending", "hip hop", "pop", "afrobeats", "chill").mapNotNull { genre ->
+    val found = Innertube.searchPage(
+        body = SearchBody(query = "$genre playlist", params = Innertube.SearchFilter.CommunityPlaylist.value),
+        fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
+    )?.getOrNull()?.items?.mapNotNull { pl ->
+        val id = pl.info?.endpoint?.browseId ?: return@mapNotNull null
+        YtHomePlaylist(id, pl.info.name ?: return@mapNotNull null, pl.channel?.name ?: genre, pl.thumbnail?.url)
+    }?.take(8).orEmpty()
+    if (found.isNotEmpty()) YtHomeShelf(genre, found) else null
+}
+
+
             YtHomeFeed(
                 playlists = playlists.distinctBy { it.browseId }.take(16),
+                shelves = shelves,
                 tracks = tracks.distinctBy { it.remoteId }.take(20),
                 artists = artists.take(12),
             )
