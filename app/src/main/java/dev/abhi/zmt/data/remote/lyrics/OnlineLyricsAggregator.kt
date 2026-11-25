@@ -50,11 +50,13 @@ class OnlineLyricsAggregator @Inject constructor(
         // 4. YouTube Music Native Lyrics (Innertube)
         val videoId = track.remoteId ?: track.uri.toString().substringAfterLast("/").takeIf { it.length == 11 }
         if (!videoId.isNullOrBlank()) {
-            runCatching { Innertube.lyrics(NextBody(videoId = videoId)).getOrNull() }
+            runCatching { Innertube.lyrics(NextBody(videoId = videoId)) }
                 .getOrNull()
+                ?.getOrNull()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { return it }
         }
+
 
         // 5. Lyrics.ovh Plain Fallback
         fetchLyricsOvh(cleanTitle, cleanArtist)?.let { return it }
@@ -63,7 +65,7 @@ class OnlineLyricsAggregator @Inject constructor(
     }
 
     private suspend fun fetchKugouKrc(title: String, artist: String, durationMs: Long): String? = runCatching {
-        val searchRes = client.get("https://kugou.com") {
+        val searchRes = client.get("https://" + "://kugou.com" + "/search") {
             parameter("ver", "1")
             parameter("man", "yes")
             parameter("client", "pc")
@@ -78,7 +80,7 @@ class OnlineLyricsAggregator @Inject constructor(
         val id = first.optString("id").ifBlank { return@runCatching null }
         val key = first.optString("accesskey").ifBlank { return@runCatching null }
 
-        val dlRes = client.get("https://kugou.com") {
+        val dlRes = client.get("https://" + "://kugou.com" + "/download") {
             parameter("ver", "1")
             parameter("client", "pc")
             parameter("id", id)
@@ -92,11 +94,11 @@ class OnlineLyricsAggregator @Inject constructor(
     }.getOrNull()
 
     private suspend fun fetchNetease(title: String, artist: String): String? = runCatching {
-        val searchRes = client.get("https://163.com") {
+        val searchRes = client.get("https://" + "://163.com" + "/api/cloudsearch/pc") {
             parameter("s", "$title $artist".trim())
             parameter("type", "1")
             parameter("limit", "5")
-            header("Referer", "https://163.com")
+            header("Referer", "https://" + "://163.com" + "/")
         }
         if (!searchRes.status.isSuccess()) return@runCatching null
         val songs = JSONObject(searchRes.bodyAsText())
@@ -107,14 +109,14 @@ class OnlineLyricsAggregator @Inject constructor(
         val songId = songs.getJSONObject(0).optLong("id", 0L)
         if (songId == 0L) return@runCatching null
 
-        val lyricRes = client.get("https://163.comapi/song/lyric/v1") {
+        val lyricRes = client.get("https://" + "://163.com" + "/api/song/lyric/v1") {
             parameter("id", songId)
             parameter("tv", "-1")
             parameter("lv", "-1")
             parameter("rv", "-1")
             parameter("kv", "-1")
             parameter("yv", "-1")
-            header("Referer", "https://163.com")
+            header("Referer", "https://" + "://163.com" + "/")
         }
         if (!lyricRes.status.isSuccess()) return@runCatching null
         val root = JSONObject(lyricRes.bodyAsText())
@@ -126,7 +128,7 @@ class OnlineLyricsAggregator @Inject constructor(
     }.getOrNull()
 
     private suspend fun fetchLrclibSearch(title: String, artist: String): String? = runCatching {
-        val res = client.get("https://lrclib.net") {
+       val res = client.get("https://" + "lrclib.net" + "/api/search") {
             parameter("track_name", title)
             if (artist.isNotBlank() && artist != "unknown artist") parameter("artist_name", artist)
         }
@@ -147,7 +149,7 @@ class OnlineLyricsAggregator @Inject constructor(
 
     private suspend fun fetchLyricsOvh(title: String, artist: String): String? = runCatching {
         if (artist.isBlank() || artist == "unknown artist") return@runCatching null
-        val url = "https://lyrics.ovh{artist.encodeURLPathPart()}/${title.encodeURLPathPart()}"
+        val url = "https://" + "api.lyrics.ovh" + "/v1/${artist.encodeURLPathPart()}/${title.encodeURLPathPart()}"
         val res = client.get(url)
         if (!res.status.isSuccess()) return@runCatching null
         JSONObject(res.bodyAsText()).optString("lyrics").ifBlank { null }
