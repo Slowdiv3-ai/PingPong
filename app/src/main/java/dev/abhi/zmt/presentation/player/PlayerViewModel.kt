@@ -1173,6 +1173,25 @@ class PlayerViewModel @Inject constructor(
     private var currentTrackHeaders: Map<String, String>? = null
     private var resolveJob: Job? = null
 
+    private fun syncExoToLocalFile(fileUri: Uri, positionMs: Long) {
+        val c = controller ?: return
+        val idx = c.currentMediaItemIndex
+        val item = c.currentMediaItem ?: return
+        if (idx < 0 || item.localConfiguration?.uri == fileUri) return
+
+        val wasPlaying = c.playWhenReady || c.isPlaying
+        lastPlayUriString = fileUri.toString()
+        lastPlayUriTime = System.currentTimeMillis()
+
+        val localItem = item.buildUpon()
+            .setUri(fileUri)
+            .build()
+        c.replaceMediaItem(idx, localItem)
+        c.seekTo(idx, positionMs)
+        c.prepare()
+        if (wasPlaying) c.play()
+    }
+
     private fun playResolvedUri(
         uri: Uri,
         startTimeMs: Long,
@@ -1195,6 +1214,7 @@ class PlayerViewModel @Inject constructor(
             val fileUri = Uri.fromFile(cachedFile)
             currentTrackUri = fileUri
             currentTrackHeaders = null
+            syncExoToLocalFile(fileUri, startTimeMs)
             rawPlayer.playUri(context, fileUri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
             return
         }
@@ -1221,6 +1241,7 @@ class PlayerViewModel @Inject constructor(
             val fileUri = Uri.fromFile(cachedFile)
             currentTrackUri = fileUri
             currentTrackHeaders = null
+            syncExoToLocalFile(fileUri, startTimeMs)
             if (controller?.playWhenReady == true || controller?.isPlaying == true) {
                 rawPlayer.isExoPlaying = true
             }
@@ -1238,7 +1259,7 @@ class PlayerViewModel @Inject constructor(
             )
         }
     }
-
+ 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
