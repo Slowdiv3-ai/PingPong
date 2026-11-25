@@ -129,7 +129,7 @@ class YoutubeStreamResolver @Inject constructor(
         return results
     }
 
-    private suspend fun resolveViaYtDlp(videoId: String): ResolvedStream? {
+    suspend fun resolveViaYtDlp(videoId: String): ResolvedStream? {
         if (!youTubeDLBridge.isReady()) {
             Log.w(TAG, "yt-dlp bridge not ready")
             return null
