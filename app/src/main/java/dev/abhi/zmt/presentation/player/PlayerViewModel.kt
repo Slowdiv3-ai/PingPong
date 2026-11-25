@@ -1173,6 +1173,8 @@ class PlayerViewModel @Inject constructor(
     private var currentTrackHeaders: Map<String, String>? = null
     private var resolveJob: Job? = null
 
+    private var isSyncingLocalFile = false
+
     private fun syncExoToLocalFile(fileUri: Uri, positionMs: Long) {
         val c = controller ?: return
         val idx = c.currentMediaItemIndex
@@ -1180,6 +1182,7 @@ class PlayerViewModel @Inject constructor(
         if (idx < 0 || item.localConfiguration?.uri == fileUri) return
 
         val wasPlaying = c.playWhenReady || c.isPlaying
+        isSyncingLocalFile = true
         lastPlayUriString = fileUri.toString()
         lastPlayUriTime = System.currentTimeMillis()
 
@@ -1269,6 +1272,10 @@ class PlayerViewModel @Inject constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // CRITICAL: Mute ExoPlayer immediately to prevent the 1-second leak
             controller?.volume = 0f 
+            if (isSyncingLocalFile) {
+                isSyncingLocalFile = false
+                return
+            }
             crossfadedForTrackId = null
 
             
