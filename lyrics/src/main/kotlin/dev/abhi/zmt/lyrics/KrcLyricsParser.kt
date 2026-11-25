@@ -1,7 +1,7 @@
 package dev.abhi.zmt.lyrics
 
-import android.util.Base64
 import java.io.ByteArrayOutputStream
+import java.util.Base64
 import java.util.zip.Inflater
 
 object KrcLyricsParser {
@@ -14,9 +14,8 @@ object KrcLyricsParser {
         raw.lineSequence().any { LINE_REGEX.matches(it.trim()) && WORD_REGEX.containsMatchIn(it) }
 
     fun decodeBase64Krc(base64Content: String): String? = runCatching {
-        val raw = Base64.decode(base64Content.trim(), Base64.DEFAULT)
+        val raw = Base64.getDecoder().decode(base64Content.trim())
         if (raw.size <= 4) return null
-        // Skip 4-byte "krc1" header and XOR-decrypt remaining bytes
         val compressed = ByteArray(raw.size - 4) { i ->
             (raw[i + 4].toInt() xor XOR_KEY[i % XOR_KEY.size]).toByte()
         }
