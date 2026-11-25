@@ -120,12 +120,11 @@ fun YtPlaylistDetailPane(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
+                    TuiTypingText(
                         text = detail.title,
                         style = MaterialTheme.typography.titleMedium,
                         color = TuiBright,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = detail.subtitle.lowercase().ifBlank { "${detail.tracks.size} tracks" },
@@ -161,7 +160,7 @@ fun YtPlaylistDetailPane(
                         .fillMaxWidth()
                         .padding(vertical = 32.dp),
                 ) {
-                    CircularProgressIndicator(color = TuiAccent, strokeWidth = 2.dp)
+                    PacmanLoader(label = "loading tracks")
                 }
             }
         } else {
@@ -245,12 +244,11 @@ fun YtArtistDetailPane(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
+                    TuiTypingText(
                         text = artist.name,
                         style = MaterialTheme.typography.titleLarge,
                         color = TuiBright,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     if (artist.topSongs.isNotEmpty()) {
@@ -270,7 +268,7 @@ fun YtArtistDetailPane(
                         .fillMaxWidth()
                         .padding(vertical = 32.dp),
                 ) {
-                    CircularProgressIndicator(color = TuiAccent, strokeWidth = 2.dp)
+                    PacmanLoader(label = "loading artist profile")
                 }
             }
         }
@@ -278,8 +276,8 @@ fun YtArtistDetailPane(
         // 1. Top Songs
         if (artist.topSongs.isNotEmpty()) {
             item {
-                Text(
-                    text = "top songs",
+                TuiTypingText(
+                    text = "> top songs",
                     style = MaterialTheme.typography.titleMedium,
                     color = TuiBright,
                     modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
@@ -301,8 +299,8 @@ fun YtArtistDetailPane(
         if (artist.albums.isNotEmpty()) {
             item {
                 HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 16.dp))
-                Text(
-                    text = "albums",
+                TuiTypingText(
+                    text = "> albums",
                     style = MaterialTheme.typography.titleMedium,
                     color = TuiBright,
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
@@ -326,8 +324,8 @@ fun YtArtistDetailPane(
         if (artist.playlists.isNotEmpty()) {
             item {
                 HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 16.dp))
-                Text(
-                    text = "featured on playlists",
+                TuiTypingText(
+                    text = "> featured on playlists",
                     style = MaterialTheme.typography.titleMedium,
                     color = TuiBright,
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
@@ -351,8 +349,8 @@ fun YtArtistDetailPane(
         if (artist.similarArtists.isNotEmpty()) {
             item {
                 HorizontalDivider(color = TuiLine, modifier = Modifier.padding(top = 16.dp))
-                Text(
-                    text = "similar artists",
+                TuiTypingText(
+                    text = "> similar artists",
                     style = MaterialTheme.typography.titleMedium,
                     color = TuiBright,
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
