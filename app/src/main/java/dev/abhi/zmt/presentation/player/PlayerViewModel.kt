@@ -667,7 +667,11 @@ class PlayerViewModel @Inject constructor(
                 crossfadedForTrackId = null
                 rawPlayer.isExoPlaying = true
                 val selected = intent.list.getOrNull(intent.index)
-                if (selected != null && selected.source == TrackSource.YOUTUBE && currentState.query.isNotBlank()) {
+                if (selected != null &&
+                    selected.source == TrackSource.YOUTUBE &&
+                    currentState.view == DmtView.LIBRARY &&
+                    currentState.query.isNotBlank()
+                ) {
                     indexTracks(listOf(selected))
                     setMediaItems(listOf(selected.toMediaItem()), 0, 0L)
                     prepare()
