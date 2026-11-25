@@ -40,6 +40,25 @@ data class YtHomeFeed(
     val artists: List<YtHomeArtist> = emptyList(),
 )
 
+data class YtPlaylistDetail(
+    val browseId: String,
+    val title: String,
+    val subtitle: String = "",
+    val coverUrl: String? = null,
+    val tracks: List<Track> = emptyList(),
+)
+
+data class YtArtistDetail(
+    val browseId: String,
+    val name: String,
+    val coverUrl: String? = null,
+    val topSongs: List<Track> = emptyList(),
+    val albums: List<YtHomePlaylist> = emptyList(),
+    val playlists: List<YtHomePlaylist> = emptyList(),
+    val similarArtists: List<YtHomeArtist> = emptyList(),
+)
+
+
 private const val TAG = "YoutubeMediaRepo"
 
 @Singleton
@@ -270,6 +289,149 @@ suspend fun radioFor(videoId: String): List<Track> {
             emptyList()
         }
     }
+
+    /** Loads full playlist/album/radio details (title, cover, and tracks) for browsing. */
+    suspend fun getYtPlaylistDetail(
+        browseId: String,
+        fallbackTitle: String,
+        fallbackCover: String? = null,
+    ): YtPlaylistDetail {
+        return try {
+            val normalizedId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
+            val page = Innertube.playlistPage(BrowseBody(browseId = normalizedId))?.getOrNull()
+            val tracks = page?.songsPage?.items?.mapNotNull { it.toTrack() }.orEmpty()
+            val title = page?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
+            val subtitle = page?.description?.takeIf { it.isNotBlank() }
+                ?: "${tracks.size} tracks"
+            val cover = page?.thumbnail?.url ?: fallbackCover ?: tracks.firstOrNull()?.coverUri?.toString()
+            YtPlaylistDetail(
+                browseId = browseId,
+                title = title,
+                subtitle = subtitle,
+                coverUrl = cover,
+                tracks = tracks,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "getYtPlaylistDetail failed for '$browseId': ${e.message}")
+            YtPlaylistDetail(browseId = browseId, title = fallbackTitle, coverUrl = fallbackCover)
+        }
+    }
+
+    /** Searches YouTube Music specifically for artist channels so users can click into their profile. */
+    suspend fun searchArtists(query: String): List<YtHomeArtist> {
+        return try {
+            val result = Innertube.searchPage(
+                body = SearchBody(
+                    query = query,
+                    params = Innertube.SearchFilter.Artist.value,
+                ),
+                fromMusicShelfRendererContent = Innertube.ArtistItem.Companion::from,
+            )?.getOrNull()
+            result?.items?.mapNotNull { item ->
+                val bId = item.info?.endpoint?.browseId ?: return@mapNotNull null
+                val name = item.info.name ?: return@mapNotNull null
+                YtHomeArtist(
+                    name = name,
+                    browseId = bId,
+                    coverUrl = item.thumbnail?.url,
+                )
+            }?.take(5).orEmpty()
+        } catch (e: Exception) {
+            Log.e(TAG, "searchArtists failed for '$query': ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Fetches full YouTube Music Artist profile: Top Songs, Albums, Featured Playlists, and Similar Artists. */
+    suspend fun getYtArtistDetail(
+        browseId: String,
+        fallbackName: String,
+        fallbackCover: String? = null,
+    ): YtArtistDetail {
+        return try {
+            val resp = Innertube.client.post("/youtubei/v1/browse") {
+                setBody(BrowseBody(browseId = browseId))
+            }.body<BrowseResponse>()
+
+            val headerThumb = resp.header?.musicImmersiveHeaderRenderer?.thumbnail
+                ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
+                ?: resp.header?.musicVisualHeaderRenderer?.thumbnail
+                    ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
+                ?: fallbackCover
+
+            val headerTitle = resp.header?.musicImmersiveHeaderRenderer?.title?.text
+                ?: resp.header?.musicVisualHeaderRenderer?.title?.text
+                ?: fallbackName
+
+            val sections = resp.contents
+                ?.singleColumnBrowseResultsRenderer
+                ?.tabs?.firstOrNull()
+                ?.tabRenderer?.content
+                ?.sectionListRenderer?.contents
+                .orEmpty()
+
+            val topSongs = mutableListOf<Track>()
+            val albums = mutableListOf<YtHomePlaylist>()
+            val playlists = mutableListOf<YtHomePlaylist>()
+            val similarArtists = mutableListOf<YtHomeArtist>()
+
+            for (section in sections) {
+                // 1. Top Songs shelf (musicShelfRenderer)
+                val shelf = section.musicShelfRenderer
+                if (shelf != null) {
+                    shelf.contents.orEmpty().forEach { item ->
+                        item.musicResponsiveListItemRenderer?.let { listItem ->
+                            Innertube.SongItem.from(listItem)?.toTrack()?.let { topSongs.add(it) }
+                        }
+                    }
+                }
+
+                // 2. Carousel shelves (Albums, Singles, Featured Playlists, Fans Also Like)
+                val carousel = section.musicCarouselShelfRenderer
+                if (carousel != null) {
+                    for (item in carousel.contents.orEmpty()) {
+                        val twoRow = item.musicTwoRowItemRenderer ?: continue
+                        val browse = twoRow.navigationEndpoint?.browseEndpoint ?: continue
+                        val bId = browse.browseId ?: continue
+                        val title = twoRow.title?.text ?: continue
+                        val subtitle = twoRow.subtitle?.runs?.joinToString("") { it.text.orEmpty() }.orEmpty()
+                        val thumb = twoRow.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
+
+                        when {
+                            bId.startsWith("MPRE") || bId.startsWith("OLAK") -> {
+                                albums.add(YtHomePlaylist(bId, title, subtitle.ifBlank { "album" }, thumb))
+                            }
+                            bId.startsWith("VL") || bId.startsWith("PL") || bId.startsWith("RD") -> {
+                                playlists.add(YtHomePlaylist(bId, title, subtitle.ifBlank { "playlist" }, thumb))
+                            }
+                            bId.startsWith("UC") -> {
+                                similarArtists.add(YtHomeArtist(title, bId, thumb))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback if topSongs came back empty
+            if (topSongs.isEmpty()) {
+                topSongs.addAll(search(headerTitle).take(10))
+            }
+
+            YtArtistDetail(
+                browseId = browseId,
+                name = headerTitle,
+                coverUrl = headerThumb ?: topSongs.firstOrNull()?.coverUri?.toString(),
+                topSongs = topSongs,
+                albums = albums,
+                playlists = playlists,
+                similarArtists = similarArtists,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "getYtArtistDetail failed for '$browseId': ${e.message}")
+            YtArtistDetail(browseId = browseId, name = fallbackName, coverUrl = fallbackCover)
+        }
+    }
+
     
     private fun Innertube.SongItem.toTrack(): Track? {
         val videoId = info?.endpoint?.videoId ?: return null
