@@ -61,11 +61,12 @@ fun MiniPlayer(
                 .padding(top = 8.dp),
         ) {
             // Artwork thumbnail
-            if (art != null && state.currentTrack != null) {
+            if (art != null || state.cover != null || state.artRaw != null) {
                 val track = state.currentTrack
-                val cover by produceState<Bitmap?>(initialValue = state.cover, track?.id) {
-                    value = if (track != null) art(track) else state.cover
+                val loaded by produceState<Bitmap?>(initialValue = null, state.nowPlayingId, track?.coverUri) {
+                    value = if (art != null && track != null) runCatching { art(track) }.getOrNull() else null
                 }
+                val cover = state.artRaw ?: state.cover ?: loaded
                 cover?.let { bitmap ->
                     Image(
                         bitmap = bitmap.asImageBitmap(),
