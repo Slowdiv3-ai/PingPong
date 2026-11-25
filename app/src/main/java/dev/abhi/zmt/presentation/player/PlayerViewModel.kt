@@ -1283,9 +1283,13 @@ class PlayerViewModel @Inject constructor(
 
         // Cancel any previous download and stop old audio immediately while loading the new track
         rawPlayer.stop()
-        val trackTitle = currentState.currentTrack?.title
+        val matchingTrack = currentState.currentTrack
+            ?: currentState.filtered.find { it.uri == uri }
+            ?: currentState.tracks.find { it.uri == uri }
+            ?: currentState.ytHome.tracks.find { it.uri == uri }
+        val trackTitle = matchingTrack?.title
             ?: controller?.currentMediaItem?.mediaMetadata?.title?.toString()
-        val trackArtist = currentState.currentTrack?.artist
+        val trackArtist = matchingTrack?.artist
             ?: controller?.currentMediaItem?.mediaMetadata?.artist?.toString()
 
         resolveJob = viewModelScope.launch {
