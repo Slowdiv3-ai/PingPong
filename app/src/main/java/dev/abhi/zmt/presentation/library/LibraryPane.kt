@@ -44,6 +44,8 @@ import dev.abhi.zmt.core.common.TrackBadges
 import dev.abhi.zmt.core.common.TuiKey
 import dev.abhi.zmt.core.common.tuiClickable
 import dev.abhi.zmt.core.common.AsciiCover
+import dev.abhi.zmt.core.common.PacmanLoader
+import dev.abhi.zmt.core.common.TuiTypingText
 import dev.abhi.zmt.domain.model.Artist
 import dev.abhi.zmt.domain.model.SourceMode
 import dev.abhi.zmt.domain.model.Track
@@ -127,21 +129,24 @@ fun LibraryPane(
             Caption(stringResource(R.string.no_audio, state.settings.sourceMode.label))
         }
 
-        if (state.scanning) {
-            Spacer(modifier = Modifier.height(16.dp))
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = TuiAccent,
-                strokeWidth = 2.dp,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (isYouTube) "searching..." else "scanning...",
-                style = MaterialTheme.typography.labelSmall,
-                color = TuiDim,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
-        }
+     if (state.scanning) {
+         Box(
+             contentAlignment = Alignment.Center,
+             modifier = Modifier
+                 .fillMaxWidth()
+                 .padding(vertical = 32.dp),
+         ) {
+             PacmanLoader(label = if (state.query.isNotBlank()) "searching '${state.query.lowercase()}'" else "scanning library")
+         }
+     } else if (isYouTube && state.query.isNotBlank() && state.filtered.isNotEmpty()) {
+         TuiTypingText(
+             text = "> ${state.filtered.size} matches for '${state.query.lowercase()}'",
+             style = MaterialTheme.typography.labelSmall,
+             color = TuiDim,
+             charDelayMs = 12L,
+             modifier = Modifier.padding(vertical = 4.dp),
+         )
+     }
 
         if (!state.scanning && state.query.isNotBlank() && state.filtered.isEmpty()) {
             Caption(stringResource(R.string.no_match))
