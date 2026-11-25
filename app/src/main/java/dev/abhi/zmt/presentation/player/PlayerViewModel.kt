@@ -1254,7 +1254,7 @@ class PlayerViewModel @Inject constructor(
         if (wasPlaying) c.play()
     }
 
-    private fun playResolvedUri(
+       private fun playResolvedUri(
         uri: Uri,
         startTimeMs: Long,
         crossfadeSeconds: Int,
@@ -1340,7 +1340,8 @@ class PlayerViewModel @Inject constructor(
                 syncExoToLocalFile(finalUri, controller?.currentPosition ?: startTimeMs)
             }
         }
-
+    }
+ 
  
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
