@@ -1,11 +1,20 @@
 package dev.abhi.zmt.core.common
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -120,3 +129,40 @@ fun PacmanLoader(
         }
     }
 }
+@Composable
+fun OdometerTimeText(
+    time: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.labelMedium,
+    color: Color = TuiBright,
+) {
+    Row(modifier = modifier.clipToBounds()) {
+        time.forEachIndexed { index, ch ->
+            if (ch.isDigit()) {
+                AnimatedContent(
+                    targetState = ch,
+                    transitionSpec = {
+                        (slideInVertically(tween(480, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(360)))
+                            .togetherWith(slideOutVertically(tween(480, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(360)))
+                    },
+                    label = "digit_$index",
+                ) { digit ->
+                    Text(
+                        text = digit.toString(),
+                        style = style,
+                        color = color,
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                Text(
+                    text = ch.toString(),
+                    style = style,
+                    color = color,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
