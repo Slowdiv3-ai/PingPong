@@ -1229,6 +1229,11 @@ class PlayerViewModel @Inject constructor(
                     resolveUrl = {
                         youtubeStreamResolver.resolve(videoId)?.let { Pair(it.url, it.userAgent) }
                     }
+                ) ?: streamCache.downloadSync(
+                    streamUri = uriStr,
+                    resolveUrl = {
+                        youtubeStreamResolver.resolveViaYtDlp(videoId)?.let { Pair(it.url, it.userAgent) }
+                    }
                 )
             }
             // Ignore if user already skipped to another track while downloading
