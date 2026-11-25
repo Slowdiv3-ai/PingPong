@@ -214,21 +214,19 @@ class YoutubeStreamResolver @Inject constructor(
             )
             val response = result?.getOrNull() ?: return null
             val streamingData = response.streamingData ?: return null
-
             val adaptive = streamingData.adaptiveFormats.orEmpty()
             val progressive = streamingData.formats.orEmpty()
 
-            val format = adaptive
-                .filter { it.mimeType.startsWith("audio/") }
-                .let { audioFormats ->
-                    audioFormats.find { it.url != null && it.itag == 140 }
-                        ?: audioFormats.find { it.url != null && it.itag == 251 }
-                        ?: audioFormats.find { it.url != null }
-                }
-                ?: progressive.find { it.url != null && it.itag == 18 }
+            val format = progressive.find { it.url != null && it.itag == 18 }
                 ?: progressive.find { it.url != null }
+                ?: adaptive
+                    .filter { it.mimeType.startsWith("audio/") }
+                    .let { audioFormats ->
+                        audioFormats.find { it.url != null && it.itag == 140 }
+                            ?: audioFormats.find { it.url != null && it.itag == 251 }
+                            ?: audioFormats.find { it.url != null }
+                    }
                 ?: return null
-
             val url = format.url
             if (url == null) {
                 Log.d(TAG, "Innertube($label): format has signatureCipher only, skipping")
