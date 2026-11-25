@@ -153,15 +153,17 @@ class YoutubeStreamResolver @Inject constructor(
                 Log.w(TAG, "yt-dlp returned wrong video ID: ${response.id}")
                 return null
             }
-
-            var url = response.url
-            var formatId = response.formatId
-            var fileSize = response.fileSize
+            var url: String? = null
+            var formatId: String? = null
+            var fileSize = 0L
             var headers = emptyMap<String, String>()
 
-            if (url == null && response.formats != null) {
+            if (response.formats != null) {
                 val audioFormats = response.formats.filter { it.isAudioOnly && it.url != null }
                 val bestAudio = audioFormats.maxByOrNull { it.audioBitrate ?: 0.0 }
+
+                if (url == null) { 
+                    url = response.url; formatId = response.formatId; fileSize = response.fileSize }
 
                 if (bestAudio != null) {
                     url = bestAudio.url
