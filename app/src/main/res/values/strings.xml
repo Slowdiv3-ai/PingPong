@@ -189,9 +189,9 @@
     <string name="stat_duplicates_empty">no duplicates found</string>
     <string name="about">about</string>
     <string name="about_title">⚡ zmt · feel the beat ⚡</string>
-    <string name="about_body">a tui-inspired local music player.\nmusic helped a lot; this is the thank-you note.</string>
-    <string name="credit">made by Abhi ❤️</string>
-    <string name="credit_url" translatable="false">https://github.com/Rezerox39</string>
+    <string name="about_body">a tui-inspired local and online music player.\nmusic helped a lot; this is the thank-you note.</string>
+    <string name="credit">made by Sixpence 😆 🤟🏽</string>
+    <string name="credit_url" translatable="false">https://github.com/Slowdiv3-ai</string>
 
 
     <string name="info_title">title</string>
