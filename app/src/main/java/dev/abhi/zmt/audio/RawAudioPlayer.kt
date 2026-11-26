@@ -360,8 +360,8 @@ class RawAudioPlayer {
 
                         if (!isOutgoing && outgoingMode != null && outgoingPreset != null && transitionProgress < 1.0f) {
                             val angle = transitionProgress * (PI.toFloat() / 2.0f)
-                            val targetOutGain = cos(angle) * currentGain
-                            val targetInGain = sin(angle) * currentGain
+                            val targetOutGain = cos(angle) * endGain
+                            val targetInGain = sin(angle) * endGain
                             val outBytes = bytes.copyOf(pcmSize)
                             applyModeAndPreset(outgoingMode!!, outgoingPreset!!, outBytes, pcmSize, actualSampleRate, lfoStep, lastOutGain, targetOutGain, outgoingFilter)
                             applyModeAndPreset(currentMode, currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, lastInGain, targetInGain, mainFilter)
