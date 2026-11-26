@@ -1296,6 +1296,31 @@ class PlayerViewModel @Inject constructor(
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
             var startedPlayback = false
 
+            val headStartCallback: (java.io.File) -> Unit = { partialFile ->
+                if (currentTrackUri == uri && !startedPlayback) {
+                    startedPlayback = true
+                    val partialUri = Uri.fromFile(partialFile)
+                    viewModelScope.launch(Dispatchers.Main) {
+                        if (currentTrackUri != uri) return@launch
+                        if (controller?.playWhenReady == true || controller?.isPlaying == true) {
+                            rawPlayer.isExoPlaying = true
+                        }
+                        rawPlayer.playUri(
+                            context,
+                            partialUri,
+                            startTimeMs,
+                            crossfadeSeconds,
+                            null,
+                            onError = { err ->
+                                Log.e("RawAudioPlayer", "DSP playback failed ($err)")
+                                onError(err)
+                            },
+                            onSuccess = onSuccess
+                        )
+                    }
+                }
+            }
+
             val finishedFile = withContext(Dispatchers.IO) {
                 streamCache.downloadProgressive(
                     streamUri = uriStr,
@@ -1303,31 +1328,21 @@ class PlayerViewModel @Inject constructor(
                         streamExtensionEngine.resolveFast(videoId, trackTitle, trackArtist)
                             ?.let { Pair(it.url, it.userAgent) }
                     },
-                    onHeadStartReady = { partialFile ->
-                        if (currentTrackUri != uri || startedPlayback) return@downloadProgressive
-                        startedPlayback = true
-                        val partialUri = Uri.fromFile(partialFile)
-                        viewModelScope.launch(Dispatchers.Main) {
-                            if (currentTrackUri != uri) return@launch
-                            if (controller?.playWhenReady == true || controller?.isPlaying == true) {
-                                rawPlayer.isExoPlaying = true
-                            }
-                            rawPlayer.playUri(
-                                context,
-                                partialUri,
-                                startTimeMs,
-                                crossfadeSeconds,
-                                null,
-                                onError = { err ->
-                                    Log.e("RawAudioPlayer", "DSP playback failed ($err)")
-                                    onError(err)
-                                },
-                                onSuccess = onSuccess
-                            )
-                        }
-                    }
-                )
+                    onHeadStartReady = headStartCallback
+                ) ?: run {
+                    // If fast stream hit 403 during download, clear cache and retry via yt-dlp progressive
+                    youtubeStreamResolver.invalidateCache(videoId)
+                    streamCache.downloadProgressive(
+                        streamUri = uriStr,
+                        resolveUrl = {
+                            youtubeStreamResolver.resolveViaYtDlp(videoId)
+                                ?.let { Pair(it.url, it.userAgent) }
+                        },
+                        onHeadStartReady = headStartCallback
+                    )
+                }
             }
+
 
             if (currentTrackUri != uri) return@launch
             if (finishedFile == null && !startedPlayback) {
