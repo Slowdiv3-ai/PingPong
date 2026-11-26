@@ -685,7 +685,7 @@ private fun SeekRow(state: DmtState, dispatch: (DmtAction) -> Unit) {
             },
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 6.dp),
         )
         Text(
             text = state.durationMs.asTime(),
