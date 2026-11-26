@@ -1277,12 +1277,7 @@ class PlayerViewModel @Inject constructor(
             .build()
         c.replaceMediaItem(idx, localItem)
         c.seekTo(idx, positionMs)
-        c.prepare()
         if (wasPlaying) c.play()
-        viewModelScope.launch {
-            delay(300L)
-            isSyncingLocalFile = false
-        }
     }
 
     private fun onRawTrackFinished() {
@@ -1335,7 +1330,9 @@ class PlayerViewModel @Inject constructor(
             if (!isRestoringSession && controller?.playWhenReady == true) {
                 rawPlayer.isExoPlaying = true
             }
-            syncExoToLocalFile(fileUri, startTimeMs)
+            if (crossfadeSeconds <= 0) {
+                syncExoToLocalFile(fileUri, startTimeMs)
+            }
             rawPlayer.playUri(context, fileUri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
             return
         }
@@ -1450,15 +1447,14 @@ class PlayerViewModel @Inject constructor(
             crossfadedForTrackId = null
 
             
-            val shouldCrossfade = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                                   reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
-            if (shouldCrossfade) {
-                rawPlayer.isExoPlaying = true
+            val shouldPlay = (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                              reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT ||
+                              controller?.playWhenReady == true ||
+                              controller?.isPlaying == true)
+            rawPlayer.isExoPlaying = shouldPlay
+            if (shouldPlay && controller?.playWhenReady != true) {
                 controller?.play()
-            } else {
-                rawPlayer.isExoPlaying = controller?.isPlaying == true
             }
-
 
             rawPlayer.setSeekPositionMs(0L)
             reduce {
@@ -1487,17 +1483,15 @@ class PlayerViewModel @Inject constructor(
                     reduce { if (it.nowPlayingId == id) it.copy(currentTrack = track) else it }
                 }
 
-                val now = System.currentTimeMillis()
-                val uriStr = uri.toString()
-                if (uriStr == lastPlayUriString && now - lastPlayUriTime < 600L) {
-                    return
-                }
-                lastPlayUriString = uriStr
-                lastPlayUriTime = now
+                lastPlayUriString = uri.toString()
+                lastPlayUriTime = System.currentTimeMillis()
 
                 val fadeSeconds = 0
-                val startPos = if (shouldCrossfade) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
-
+                val startPos = if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+                ) 0L else (controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
+                
                 playResolvedUri(uri, startPos, fadeSeconds,
                     onError = { msg ->
                         android.util.Log.e("RawAudioPlayer", "DSP FAILED: " + msg)
