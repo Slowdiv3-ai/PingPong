@@ -263,7 +263,7 @@ class YoutubeStreamResolver @Inject constructor(
         return try {
             val result = Innertube.player(
                 body = PlayerBody(videoId = videoId, context = context),
-                checkIsValid = true,
+                checkIsValid = false,
             )
             val response = result?.getOrNull() ?: return null
             val streamingData = response.streamingData ?: return null
@@ -283,15 +283,19 @@ class YoutubeStreamResolver @Inject constructor(
                 return null
             }
 
+            // Reject any URL that downgraded to c=IOS (which triggers 403 on full downloads)
+            if (url.contains("c=IOS")) {
+                Log.d(TAG, "Innertube($label): skipping c=IOS URL to avoid 403")
+                return null
+            }
+
             val userAgent = when {
-                url.contains("c=IOS") -> UserAgents.IOS
-                url.contains("c=ANDROID_VR") -> UserAgents.ANDROID_VR
                 url.contains("c=ANDROID_MUSIC") -> UserAgents.ANDROID_MUSIC
+                url.contains("c=ANDROID") -> "com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip"
                 url.contains("c=TVHTML5") -> UserAgents.TV
-                label == "ANDROID_VR" -> UserAgents.ANDROID_VR
-                label == "IOS" -> UserAgents.IOS
+                label == "ANDROID_MUSIC" -> UserAgents.ANDROID_MUSIC
                 label == "TVHTML5" -> UserAgents.TV
-                else -> UserAgents.IOS
+                else -> "com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip"
             }
 
             Log.d(TAG, "Innertube($label): ${format.mimeType} itag=${format.itag} (${format.bitrate}kbps)")
@@ -306,4 +310,5 @@ class YoutubeStreamResolver @Inject constructor(
             null
         }
     }
+
 }
