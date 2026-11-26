@@ -423,11 +423,13 @@ class RawAudioPlayer {
                 }
             }
             
-            if (!isOutgoing) {
+            if (!isOutgoing && sawOutputEOS && !Thread.currentThread().isInterrupted && playbackThread === Thread.currentThread()) {
                 Handler(Looper.getMainLooper()).post { onSuccess() }
             }
         } catch (e: Exception) {
-            if (!isOutgoing) Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+            if (!isOutgoing && !Thread.currentThread().isInterrupted && playbackThread === Thread.currentThread()) {
+                Handler(Looper.getMainLooper()).post { onError(e.toString()) }
+            }
         } finally {
             try { localCodec?.stop(); localCodec?.release() } catch (_: Exception) {}
             try { localExtractor?.release() } catch (_: Exception) {}
