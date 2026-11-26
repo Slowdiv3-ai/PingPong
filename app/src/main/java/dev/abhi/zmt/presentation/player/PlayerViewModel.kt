@@ -733,11 +733,15 @@ class PlayerViewModel @Inject constructor(
             }
             DmtAction.Next -> {
                 reduce { it.copy(showDownloadSheet = false) }
-                c?.seekToNext() // ExoPlayer automatically keeps playing if it was already playing
+                rawPlayer.isExoPlaying = true
+                c?.seekToNext()
+                c?.play()
             }
             DmtAction.Prev -> {
                 reduce { it.copy(showDownloadSheet = false) }
+                rawPlayer.isExoPlaying = true
                 c?.seekToPrevious()
+                c?.play()
             }
             DmtAction.ToggleShuffle -> c?.run { shuffleModeEnabled = !shuffleModeEnabled }
             DmtAction.CycleRepeat -> c?.cycleRepeat()
@@ -1279,6 +1283,28 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private fun onRawTrackFinished() {
+        if (isRestoringSession) return
+        val c = controller ?: return
+        if (c.repeatMode == Player.REPEAT_MODE_ONE) {
+            rawPlayer.isExoPlaying = true
+            c.seekTo(c.currentMediaItemIndex, 0L)
+            c.play()
+        } else if (c.hasNextMediaItem()) {
+            rawPlayer.isExoPlaying = true
+            c.seekToNextMediaItem()
+            c.play()
+        } else if (c.repeatMode == Player.REPEAT_MODE_ALL && c.mediaItemCount > 0) {
+            rawPlayer.isExoPlaying = true
+            c.seekTo(0, 0L)
+            c.play()
+        } else {
+            rawPlayer.isExoPlaying = false
+            c.pause()
+            reduce { it.copy(isPlaying = false) }
+        }
+    }
+
        private fun playResolvedUri(
         uri: Uri,
         startTimeMs: Long,
@@ -1292,6 +1318,9 @@ class PlayerViewModel @Inject constructor(
         if (uri.scheme != "youtube") {
             currentTrackUri = uri
             currentTrackHeaders = null
+            if (!isRestoringSession && controller?.playWhenReady == true) {
+                rawPlayer.isExoPlaying = true
+            }
             rawPlayer.playUri(context, uri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
             return
         }
@@ -1301,6 +1330,9 @@ class PlayerViewModel @Inject constructor(
             val fileUri = Uri.fromFile(cachedFile)
             currentTrackUri = fileUri
             currentTrackHeaders = null
+            if (!isRestoringSession && controller?.playWhenReady == true) {
+                rawPlayer.isExoPlaying = true
+            }
             syncExoToLocalFile(fileUri, startTimeMs)
             rawPlayer.playUri(context, fileUri, startTimeMs, crossfadeSeconds, null, onError, onSuccess)
             return
@@ -1448,6 +1480,7 @@ class PlayerViewModel @Inject constructor(
                     },
                     onSuccess = {
                         controller?.volume = 0f
+                        onRawTrackFinished()
                     }
                 )
             } else {
@@ -1508,7 +1541,7 @@ class PlayerViewModel @Inject constructor(
                     lastPlayUriTime = now
                     playResolvedUri(uri, newPosition.positionMs, 0,
                         onError = { msg -> android.util.Log.e("RawAudioPlayer", "Seek error: " + msg) },
-                        onSuccess = { }
+                        onSuccess = { onRawTrackFinished() }
                     )
                 }
             }
