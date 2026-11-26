@@ -1252,6 +1252,10 @@ class PlayerViewModel @Inject constructor(
         c.seekTo(idx, positionMs)
         c.prepare()
         if (wasPlaying) c.play()
+        viewModelScope.launch {
+            delay(300L)
+            isSyncingLocalFile = false
+        }
     }
 
        private fun playResolvedUri(
@@ -1302,8 +1306,9 @@ class PlayerViewModel @Inject constructor(
                     val partialUri = Uri.fromFile(partialFile)
                     viewModelScope.launch(Dispatchers.Main) {
                         if (currentTrackUri != uri) return@launch
-                        if (controller?.playWhenReady == true || controller?.isPlaying == true) {
+                        if (!isRestoringSession) {
                             rawPlayer.isExoPlaying = true
+                            rawPlayer.resume()
                         }
                         rawPlayer.playUri(
                             context,
@@ -1464,6 +1469,7 @@ class PlayerViewModel @Inject constructor(
 
         
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (isSyncingLocalFile) return
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 controller?.volume = 0f
                 controller?.play()
