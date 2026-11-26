@@ -81,6 +81,11 @@ class RawAudioPlayer {
     private var lfoPhase = 0.0f
     @Volatile private var currentAudioTrack: AudioTrack? = null
 
+    @Volatile private var currentSampleRate: Int = 44100
+    @Volatile private var trackStartOffsetMs: Long = 0L
+    @Volatile private var isHardwarePlaying: Boolean = false
+    @Volatile private var lastKnownPositionMs: Long = 0L
+
     private fun resetFilters() {
         mainFilter.reset()
         outgoingFilter.reset()
@@ -103,6 +108,10 @@ class RawAudioPlayer {
         
         val isOverlap = crossfadeSeconds > 0 && playbackThread?.isAlive == true
         val fadeDurationMs = (crossfadeSeconds * 1000).toLong()
+
+        isHardwarePlaying = false
+        trackStartOffsetMs = startTimeMs
+        lastKnownPositionMs = startTimeMs
 
         if (isOverlap) {
             Log.d(TAG, "🎧 Starting Overlap Crossfade...")
@@ -199,6 +208,8 @@ class RawAudioPlayer {
             localAudioTrack = buildAudioTrack(actualSampleRate)
 
             if (!isOutgoing) {
+                currentSampleRate = actualSampleRate
+                trackStartOffsetMs = startTimeMs
                 currentAudioTrack = localAudioTrack
                 if (isExoPlaying) {
                     localAudioTrack.play()
@@ -318,6 +329,7 @@ class RawAudioPlayer {
                         try { localAudioTrack?.stop(); localAudioTrack?.release() } catch (_: Exception) {}
                         localAudioTrack = buildAudioTrack(actualSampleRate)
                         if (!isOutgoing) {
+                            currentSampleRate = actualSampleRate
                             currentAudioTrack = localAudioTrack
                             if (isExoPlaying) localAudioTrack?.play()
                         } else {
@@ -399,6 +411,9 @@ class RawAudioPlayer {
                         }
 
                         localAudioTrack?.write(bytes, 0, pcmSize, AudioTrack.WRITE_BLOCKING)
+                        if (!isOutgoing && localAudioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                            isHardwarePlaying = true
+                        }
 
                     }
                     localCodec.releaseOutputBuffer(outputBufferIndex, false)
@@ -635,8 +650,34 @@ class RawAudioPlayer {
         }
     }
 
+    fun isActuallyPlaying(): Boolean {
+        val track = currentAudioTrack ?: return false
+        return isExoPlaying && isHardwarePlaying && track.playState == AudioTrack.PLAYSTATE_PLAYING
+    }
+
+    fun getCurrentPositionMs(): Long {
+        val track = currentAudioTrack ?: return lastKnownPositionMs
+        val rate = currentSampleRate
+        if (rate <= 0) return lastKnownPositionMs
+        return try {
+            val framesPlayed = track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+            val playedMs = (framesPlayed * 1000L) / rate
+            val pos = trackStartOffsetMs + playedMs
+            lastKnownPositionMs = pos
+            pos
+        } catch (_: Exception) {
+            lastKnownPositionMs
+        }
+    }
+
+    fun setSeekPositionMs(positionMs: Long) {
+        trackStartOffsetMs = positionMs
+        lastKnownPositionMs = positionMs
+    }
+
     fun pause() { 
         isExoPlaying = false
+        isHardwarePlaying = false
         val track = currentAudioTrack
         try { if (track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause() } catch (_: Exception) {}
     }
@@ -656,6 +697,8 @@ class RawAudioPlayer {
     @Synchronized
     fun stop() {
         isPlaying = false
+        isHardwarePlaying = false
+        lastKnownPositionMs = 0L
         playbackThread?.interrupt(); try { playbackThread?.join(1500) } catch (_: Exception) {}
         outgoingThread?.interrupt(); try { outgoingThread?.join(1500) } catch (_: Exception) {}
         playbackThread = null; outgoingThread = null; currentAudioTrack = null
