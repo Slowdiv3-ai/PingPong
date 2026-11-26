@@ -224,29 +224,30 @@ fun PacmanSeekBar(
                 )
             },
     ) {
-        // Fit slots cleanly to the available width (~7.5dp per monospace char at labelSmall)
-        val slots = ((maxWidth.value / 7.6f).toInt() - 2).coerceIn(12, 34)
+        // Stretch full width from [ to ] using larger bodyMedium monospace glyphs (~8.4dp/char)
+        val slots = ((maxWidth.value / 8.4f).toInt() - 2).coerceIn(18, 48)
         val clamped = fraction.coerceIn(0f, 1f)
         val pacIndex = (clamped * (slots - 1)).toInt().coerceIn(0, slots - 1)
 
         val bar = buildAnnotatedString {
-            withStyle(SpanStyle(color = TuiDim)) { append("[") }
+            withStyle(SpanStyle(color = TuiDim, fontWeight = FontWeight.Bold)) { append("[") }
             for (i in 0 until slots) {
                 when {
-                    i < pacIndex -> withStyle(SpanStyle(color = TuiFaint)) { append("-") }
+                    i < pacIndex -> withStyle(SpanStyle(color = TuiFaint, fontWeight = FontWeight.Bold)) { append("-") }
                     i == pacIndex -> withStyle(SpanStyle(color = TuiAccent, fontWeight = FontWeight.Bold)) { append(pacChar) }
                     i % 2 == 0 -> withStyle(SpanStyle(color = TuiBright)) { append("•") }
                     else -> append(" ")
                 }
             }
-            withStyle(SpanStyle(color = TuiDim)) { append("]") }
+            withStyle(SpanStyle(color = TuiDim, fontWeight = FontWeight.Bold)) { append("]") }
         }
 
         Text(
             text = bar,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             softWrap = false,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
