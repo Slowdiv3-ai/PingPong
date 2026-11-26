@@ -290,16 +290,17 @@ class RawAudioPlayer {
                 }
 
 
-                var currentGain = 1.0f
+                var startGain = 1.0f
+                var endGain = 1.0f
                 if (isOutgoing) {
                     val elapsed = System.currentTimeMillis() - fadeOutStartMs
-                    currentGain = 1.0f - (elapsed.toFloat() / fadeOutDurationMs)
-                    if (currentGain <= 0.0f) break
-                } else {
-                    if (fadeInDurationMs > 0) {
-                        val elapsed = System.currentTimeMillis() - fadeInStartMs
-                        currentGain = (elapsed.toFloat() / fadeInDurationMs).coerceIn(0f, 1f)
-                    }
+                    startGain = (1.0f - (elapsed.toFloat() / fadeOutDurationMs)).coerceIn(0f, 1f)
+                    endGain = (1.0f - ((elapsed + 25L).toFloat() / fadeOutDurationMs)).coerceIn(0f, 1f)
+                    if (startGain <= 0.0f) break
+                } else if (fadeInDurationMs > 0) {
+                    val elapsed = System.currentTimeMillis() - fadeInStartMs
+                    startGain = (elapsed.toFloat() / fadeInDurationMs).coerceIn(0f, 1f)
+                    endGain = ((elapsed + 25L).toFloat() / fadeInDurationMs).coerceIn(0f, 1f)
                 }
 
                 if (!sawInputEOS) {
@@ -392,11 +393,10 @@ class RawAudioPlayer {
                             } else {
                                 applySinglePreset(currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, 1.0f, 1.0f, mainFilter)
                             }
-                            if (currentGain < 1.0f) applyFade(bytes, pcmSize, currentGain)
+                            if (startGain < 1.0f || endGain < 1.0f) applyFade(bytes, pcmSize, startGain, endGain)
                         } else {
-                            applyModeAndPreset(currentMode, currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, currentGain, currentGain, mainFilter)
+                            applyModeAndPreset(currentMode, currentPreset, bytes, pcmSize, actualSampleRate, lfoStep, startGain, endGain, mainFilter)
                         }
-
 
                         // Advance LFO exactly ONCE per buffer
                         lfoPhase += (pcmSize / 4) * lfoStep
