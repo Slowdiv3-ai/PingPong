@@ -1168,11 +1168,9 @@ class PlayerViewModel @Inject constructor(
                 val duration = c.duration.takeIf { d -> d != C.TIME_UNSET }?.coerceAtLeast(0L) ?: currentState.durationMs
                 val index = c.currentMediaItemIndex
 
-                // Keep muted ExoPlayer paused while RawAudioPlayer is still loading/resolving
-                // so ExoPlayer never runs ahead of the speaker output.
-                if (c.isPlaying && !rawPlaying && !isRestoringSession) {
-                    c.pause()
-                } else if (!c.isPlaying && rawPlaying && c.playWhenReady && !isRestoringSession) {
+                // Only sync ExoPlayer -> RawAudioPlayer when RawAudioPlayer is actually running;
+                // never force-pause ExoPlayer while a new track is still spinning up.
+                if (!c.isPlaying && rawPlaying && c.playWhenReady && !isRestoringSession) {
                     c.play()
                 }
 
@@ -1341,15 +1339,17 @@ class PlayerViewModel @Inject constructor(
         if (crossfadeSeconds <= 0) {
             rawPlayer.stop()
         }
-        val matchingTrack = currentState.currentTrack
+        val matchingTrack = currentState.currentTrack?.takeIf { it.uri == uri }
             ?: currentState.filtered.find { it.uri == uri }
             ?: currentState.tracks.find { it.uri == uri }
             ?: currentState.ytHome.tracks.find { it.uri == uri }
+        val matchingItem = (0 until (controller?.mediaItemCount ?: 0))
+            .mapNotNull { controller?.getMediaItemAt(it) }
+            .find { it.localConfiguration?.uri == uri }
         val trackTitle = matchingTrack?.title
-            ?: controller?.currentMediaItem?.mediaMetadata?.title?.toString()
+            ?: matchingItem?.mediaMetadata?.title?.toString()
         val trackArtist = matchingTrack?.artist
-            ?: controller?.currentMediaItem?.mediaMetadata?.artist?.toString()
-
+            ?: matchingItem?.mediaMetadata?.artist?.toString()
         resolveJob = viewModelScope.launch {
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
             val resolved = withContext(Dispatchers.IO) {
