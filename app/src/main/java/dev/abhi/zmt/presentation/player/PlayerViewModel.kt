@@ -666,6 +666,7 @@ class PlayerViewModel @Inject constructor(
                 reduce { it.copy(error = null) }
                 lastPlayUriString = ""
                 crossfadedForTrackId = null
+                isCrossfadeTransition = false
                 rawPlayer.isExoPlaying = true
                 val selected = intent.list.getOrNull(intent.index)
                 if (selected != null &&
@@ -1184,6 +1185,7 @@ class PlayerViewModel @Inject constructor(
                         val nextItem = c.getMediaItemAt(c.nextMediaItemIndex)
                         val nextUri = nextItem.localConfiguration?.uri
                         if (nextUri != null) {
+                            isCrossfadeTransition = true
                             lastPlayUriString = nextUri.toString()
                             lastPlayUriTime = System.currentTimeMillis()
                             playResolvedUri(
@@ -1191,11 +1193,10 @@ class PlayerViewModel @Inject constructor(
                                 0L,
                                 fadeSec,
                                 onError = { msg -> android.util.Log.e("RawAudioPlayer", "Crossfade error: " + msg) },
-                                onSuccess = { }
+                                onSuccess = { onRawTrackFinished() }
                             )
                             c.seekToNextMediaItem()
                         }
-
                     }
                 }
 
@@ -1237,9 +1238,10 @@ class PlayerViewModel @Inject constructor(
     private var lastPlayedTrackId: String? = null
     private var currentTrackUri: Uri? = null
 
-        private var lastPlayUriTime = 0L
+    private var lastPlayUriTime = 0L
     private var lastPlayUriString = ""
     private var crossfadedForTrackId: String? = null
+    private var isCrossfadeTransition = false
 
     private fun getCrossfadeSeconds(): Int =
         currentState.settings.crossfadeDuration.seconds
@@ -1338,8 +1340,10 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // Cancel any previous download and stop old audio immediately while loading the new track
-        rawPlayer.stop()
+        // Only stop current audio immediately if we are NOT crossfading from Song A
+        if (crossfadeSeconds <= 0) {
+            rawPlayer.stop()
+        }
         val matchingTrack = currentState.currentTrack
             ?: currentState.filtered.find { it.uri == uri }
             ?: currentState.tracks.find { it.uri == uri }
@@ -1420,6 +1424,27 @@ class PlayerViewModel @Inject constructor(
             controller?.volume = 0f 
             if (isSyncingLocalFile) {
                 isSyncingLocalFile = false
+                return
+            }
+            if (isCrossfadeTransition) {
+                isCrossfadeTransition = false
+                rawPlayer.isExoPlaying = true
+                controller?.play()
+                rawPlayer.setSeekPositionMs(0L)
+                reduce {
+                    it.withNowPlaying(controller).copy(
+                        positionMs = 0L,
+                        isPlaying = true,
+                        showDownloadSheet = false,
+                        lyrics = null,
+                        fault = null,
+                        error = null,
+                    )
+                }
+                loadCover(mediaItem)
+                loadTech(mediaItem)
+                loadLyrics(mediaItem)
+                loadLiked(mediaItem)
                 return
             }
             crossfadedForTrackId = null
