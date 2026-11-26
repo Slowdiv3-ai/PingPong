@@ -721,7 +721,16 @@ class PlayerViewModel @Inject constructor(
             }
 
 
-            DmtAction.TogglePlay -> c?.togglePlayPause()
+            DmtAction.TogglePlay -> c?.run {
+                if (rawPlayer.isActuallyPlaying() || playWhenReady) {
+                    rawPlayer.pause()
+                    pause()
+                    reduce { it.copy(isPlaying = false) }
+                } else {
+                    rawPlayer.resume()
+                    play()
+                }
+            }
             DmtAction.Next -> {
                 reduce { it.copy(showDownloadSheet = false) }
                 c?.seekToNext() // ExoPlayer automatically keeps playing if it was already playing
@@ -737,6 +746,7 @@ class PlayerViewModel @Inject constructor(
                 val duration = currentState.durationMs
                 if (duration > 0) {
                     val target = (intent.fraction * duration).toLong()
+                    rawPlayer.setSeekPositionMs(target)
                     seekTo(target)
                     reduce { it.copy(positionMs = target) }
                 }
@@ -1148,14 +1158,23 @@ class PlayerViewModel @Inject constructor(
                 // especially during track transitions before callbacks fire.
                 c.volume = 0f 
                 
-                val position = c.currentPosition.coerceAtLeast(0L)
+                val rawPlaying = rawPlayer.isActuallyPlaying()
+                val position = rawPlayer.getCurrentPositionMs().coerceAtLeast(0L)
                 val duration = c.duration.takeIf { d -> d != C.TIME_UNSET }?.coerceAtLeast(0L) ?: currentState.durationMs
                 val index = c.currentMediaItemIndex
+
+                // Keep muted ExoPlayer paused while RawAudioPlayer is still loading/resolving
+                // so ExoPlayer never runs ahead of the speaker output.
+                if (c.isPlaying && !rawPlaying && !isRestoringSession) {
+                    c.pause()
+                } else if (!c.isPlaying && rawPlaying && c.playWhenReady && !isRestoringSession) {
+                    c.play()
+                }
 
                 val fadeSec = getCrossfadeSeconds()
                 val fadeMs = fadeSec * 1000L
                 val currentId = c.currentMediaItem?.mediaId
-                if (c.isPlaying && fadeSec > 0 && duration > fadeMs && (duration - position) in 1..fadeMs) {
+                if (rawPlaying && fadeSec > 0 && duration > fadeMs && (duration - position) in 1..fadeMs) {
                     if (currentId != null && crossfadedForTrackId != currentId && c.hasNextMediaItem()) {
                         crossfadedForTrackId = currentId
                         val nextItem = c.getMediaItemAt(c.nextMediaItemIndex)
@@ -1186,6 +1205,7 @@ class PlayerViewModel @Inject constructor(
                     val vol = c.volume
                     if (it.positionMs == position &&
                         it.durationMs == duration &&
+                        it.isPlaying == rawPlaying &&
                         it.queueIndex == index &&
                         it.sleepLeftMs == sleepLeft &&
                         abs(it.volume - vol) < 0.01f &&
@@ -1196,6 +1216,7 @@ class PlayerViewModel @Inject constructor(
                         it.copy(
                             positionMs = position,
                             durationMs = duration,
+                            isPlaying = rawPlaying,
                             queueIndex = index,
                             sleepLeftMs = sleepLeft,
                             volume = vol,
@@ -1203,7 +1224,7 @@ class PlayerViewModel @Inject constructor(
                         )
                     }
                 }
-                delay((if (c.isPlaying) 500 else 1500).milliseconds)
+                delay((if (rawPlaying) 100 else 400).milliseconds)
             }
         }
     
@@ -1382,8 +1403,16 @@ class PlayerViewModel @Inject constructor(
             }
 
 
+            rawPlayer.setSeekPositionMs(0L)
             reduce {
-                it.withNowPlaying(controller).copy(showDownloadSheet = false, lyrics = null, fault = null, error = null)
+                it.withNowPlaying(controller).copy(
+                    positionMs = 0L,
+                    isPlaying = false,
+                    showDownloadSheet = false,
+                    lyrics = null,
+                    fault = null,
+                    error = null,
+                )
             }
             loadCover(mediaItem)
             loadTech(mediaItem)
@@ -1438,25 +1467,25 @@ class PlayerViewModel @Inject constructor(
                 reduce { it.copy(isPlaying = false) }
                 return
             }
-            val shouldBePlaying = isPlaying || (controller?.playWhenReady == true && controller?.playbackState == Player.STATE_BUFFERING)
+            val shouldBePlaying = isPlaying || (controller?.playWhenReady == true)
             rawPlayer.isExoPlaying = shouldBePlaying
-            reduce { it.copy(isPlaying = isPlaying) }
             if (shouldBePlaying) {
                 controller?.volume = 0f
                 rawPlayer.resume()
             } else {
                 rawPlayer.pause()
+                reduce { it.copy(isPlaying = false) }
             }
         }
         
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_BUFFERING) {
-                rawPlayer.isExoPlaying = false
-                rawPlayer.pause()
-            } else if (playbackState == Player.STATE_READY && controller?.playWhenReady == true) {
+            if (playbackState == Player.STATE_READY && controller?.playWhenReady == true) {
                 rawPlayer.isExoPlaying = true
                 rawPlayer.resume()
+            } else if (controller?.playWhenReady == false) {
+                rawPlayer.isExoPlaying = false
+                rawPlayer.pause()
             }
         }
 
@@ -1596,7 +1625,7 @@ class PlayerViewModel @Inject constructor(
             title = meta.title?.toString() ?: title,
             artist = meta.artist?.toString() ?: artist,
             album = meta.albumTitle?.toString() ?: album,
-            positionMs = c.currentPosition.coerceAtLeast(0L),
+            positionMs = rawPlayer.getCurrentPositionMs().coerceAtLeast(0L),
             durationMs = c.duration.takeIf { d -> d != C.TIME_UNSET }?.coerceAtLeast(0L) ?: durationMs,
         )
     }
