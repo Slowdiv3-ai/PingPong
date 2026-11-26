@@ -1356,12 +1356,11 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
 
-            // Once full file is saved on disk, point currentTrackUri & ExoPlayer timeline to it
+            // Once full file is saved on disk, update currentTrackUri for future seeks without interrupting playback
             if (finishedFile != null) {
                 val finalUri = Uri.fromFile(finishedFile)
                 currentTrackUri = finalUri
                 currentTrackHeaders = null
-                syncExoToLocalFile(finalUri, controller?.currentPosition ?: startTimeMs)
             }
         }
     }
