@@ -64,7 +64,7 @@ class StreamExtensionEngine @Inject constructor(
         }
 
         val startMs = System.currentTimeMillis()
-        val fastWin = withTimeoutOrNull(3_500L) {
+        val fastWin = withTimeoutOrNull(1_200L) {
             raceProviders(videoId, title, artist)
         }
 
