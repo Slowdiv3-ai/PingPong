@@ -1298,69 +1298,64 @@ class PlayerViewModel @Inject constructor(
 
         resolveJob = viewModelScope.launch {
             val videoId = uri.lastPathSegment ?: uriStr.removePrefix("youtube://video/")
-            var startedPlayback = false
-
-            val headStartCallback: (java.io.File) -> Unit = { partialFile ->
-                if (currentTrackUri == uri && !startedPlayback) {
-                    startedPlayback = true
-                    val partialUri = Uri.fromFile(partialFile)
-                    viewModelScope.launch(Dispatchers.Main) {
-                        if (currentTrackUri != uri) return@launch
-                        if (!isRestoringSession) {
-                            rawPlayer.isExoPlaying = true
-                            rawPlayer.resume()
-                        }
-                        rawPlayer.playUri(
-                            context,
-                            partialUri,
-                            startTimeMs,
-                            crossfadeSeconds,
-                            null,
-                            onError = { err ->
-                                Log.e("RawAudioPlayer", "DSP playback failed ($err)")
-                                onError(err)
-                            },
-                            onSuccess = onSuccess
-                        )
-                    }
-                }
+            val resolved = withContext(Dispatchers.IO) {
+                streamExtensionEngine.resolveFast(videoId, trackTitle, trackArtist)
             }
-
-            val finishedFile = withContext(Dispatchers.IO) {
-                streamCache.downloadProgressive(
-                    streamUri = uriStr,
-                    resolveUrl = {
-                        streamExtensionEngine.resolveFast(videoId, trackTitle, trackArtist)
-                            ?.let { Pair(it.url, it.userAgent) }
-                    },
-                    onHeadStartReady = headStartCallback
-                ) ?: run {
-                    // If fast stream hit 403 during download, clear cache and retry via yt-dlp progressive
-                    youtubeStreamResolver.invalidateCache(videoId)
-                    streamCache.downloadProgressive(
-                        streamUri = uriStr,
-                        resolveUrl = {
-                            youtubeStreamResolver.resolveViaYtDlp(videoId)
-                                ?.let { Pair(it.url, it.userAgent) }
-                        },
-                        onHeadStartReady = headStartCallback
-                    )
-                }
-            }
-
 
             if (currentTrackUri != uri) return@launch
-            if (finishedFile == null && !startedPlayback) {
+            if (resolved == null) {
                 Log.e("RawAudioPlayer", "All stream extensions failed for $videoId")
                 onError("Could not load stream for $videoId")
                 return@launch
             }
 
-            // Once full file is saved on disk, update currentTrackUri for future seeks without interrupting playback
-            if (finishedFile != null) {
-                val finalUri = Uri.fromFile(finishedFile)
-                currentTrackUri = finalUri
-                currentTrackHeaders = null
+            val streamHttpUri = Uri.parse(resolved.url)
+            val headers = buildMap {
+                put("User-Agent", resolved.userAgent)
+                putAll(resolved.httpHeaders)
+            }
+            currentTrackHeaders = headers
+
+            // 1. Start DSP playback immediately over HTTP (~0.25s, full moov atom via range requests)
+            if (!isRestoringSession) {
+                rawPlayer.isExoPlaying = true
+                rawPlayer.resume()
+            }
+            rawPlayer.playUri(
+                context,
+                streamHttpUri,
+                startTimeMs,
+                crossfadeSeconds,
+                headers,
+                onError = { err ->
+                    Log.e("RawAudioPlayer", "DSP HTTP stream failed ($err), falling back to full cache")
+                    // Fallback to full local download if HTTP extractor fails
+                    viewModelScope.launch(Dispatchers.IO) {
+                        youtubeStreamResolver.invalidateCache(videoId)
+                        val fallbackFile = streamCache.downloadSync(
+                            streamUri = uriStr,
+                            resolveUrl = {
+                                youtubeStreamResolver.resolveViaYtDlp(videoId)
+                                    ?.let { Pair(it.url, it.userAgent) }
+                            }
+                        )
+                        if (fallbackFile != null && currentTrackUri == uri) {
+                            withContext(Dispatchers.Main) {
+                                rawPlayer.isExoPlaying = true
+                                rawPlayer.resume()
+                                rawPlayer.playUri(context, Uri.fromFile(fallbackFile), startTimeMs, crossfadeSeconds, null, onError, onSuccess)
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) { onError(err) }
+                        }
+                    }
+                },
+                onSuccess = onSuccess
+            )
+
+            // 2. Cache full file in background so future plays & seeks are instant offline
+            streamCache.cacheInBackground(uriStr) {
+                Pair(resolved.url, resolved.userAgent)
             }
         }
     }
