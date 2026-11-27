@@ -408,22 +408,15 @@ suspend fun radioFor(videoId: String): List<Track> {
     }
 
     /** Fetches official & community YouTube Music playlists for a genre (supports endless pagination via continuation). */
-    suspend fun genrePlaylists(genre: String, continuation: String? = null): Pair<List<YtHomePlaylist>, String?> {
+    suspend fun genrePlaylists(genre: String, pageIndex: Int = 0): Pair<List<YtHomePlaylist>, String?> {
         return try {
-            val page = if (continuation != null) {
-                Innertube.searchPage(
-                    body = ContinuationBody(continuation = continuation),
-                    fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
-                )?.getOrNull()
-            } else {
-                Innertube.searchPage(
+            val page = Innertube.searchPage(
                     body = SearchBody(
-                        query = "$genre music playlist",
+                        query = if (pageIndex == 0) "$genre music playlist" else "$genre hits playlist $pageIndex",
                         params = Innertube.SearchFilter.CommunityPlaylist.value,
                     ),
                     fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
                 )?.getOrNull()
-            }
             val list = page?.items?.mapNotNull { pl ->
                 val bId = pl.info?.endpoint?.browseId ?: return@mapNotNull null
                 val name = pl.info.name ?: return@mapNotNull null
@@ -434,7 +427,7 @@ suspend fun radioFor(videoId: String): List<Track> {
                     coverUrl = pl.thumbnail?.url,
                 )
             }.orEmpty()
-            list to page?.continuation
+            list to if (list.isNotEmpty()) (pageIndex + 1).toString() else null
         } catch (e: Exception) {
             Log.e(TAG, "genrePlaylists failed for '$genre': ${e.message}")
             emptyList<YtHomePlaylist>() to null
