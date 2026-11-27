@@ -24,9 +24,10 @@ import dev.abhi.zmt.util.QueueEntry
 enum class LibrarySection { ALL, RECENT, PLAYED }
 
 enum class DmtView {
-    HOME, LIBRARY, ALBUMS, ARTISTS, GENRES, FOLDERS, PLAYLISTS, SETTINGS, STATS, BLOCKLIST,
+    HOME, SEARCH, LIBRARY, ALBUMS, ARTISTS, GENRES, FOLDERS, PLAYLISTS, SETTINGS, STATS, BLOCKLIST,
     SOURCES, SOURCE_LOGIN, PERMISSIONS, IMPORTED, YT_PLAYLIST, YT_ARTIST
 }
+
 
 data class DmtState(
     val hasPermission: Boolean = false,
@@ -84,6 +85,13 @@ data class DmtState(
     val ytDetailLoading: Boolean = false,
     val ytPreviousView: DmtView = DmtView.HOME,
     val ytSearchedArtists: List<YtHomeArtist> = emptyList(),
+    val ytLikedSongs: List<Track> = emptyList(),
+    val ytSavedPlaylists: List<YtHomePlaylist> = emptyList(),
+    val selectedGenre: String? = null,
+    val genrePlaylists: List<YtHomePlaylist> = emptyList(),
+    val genreContinuation: String? = null,
+    val genreLoadingMore: Boolean = false,
+    val ytSearchGenres: Map<Long, String> = emptyMap(),
     val tech: List<Spec> = emptyList(),
     val route: List<Spec> = emptyList(),
     val fault: String? = null,
@@ -183,6 +191,9 @@ sealed interface DmtAction {
     data class OpenYtPlaylist(val browseId: String, val title: String, val coverUrl: String? = null) : DmtAction
     data class OpenYtArtist(val browseId: String, val name: String, val coverUrl: String? = null) : DmtAction
     data object RefreshYtHome : DmtAction
+    data class OpenYtGenre(val genre: String) : DmtAction
+    data object LoadMoreYtGenre : DmtAction
+    data object CloseYtGenre : DmtAction
 }
 
 data class QueueRemoval(val index: Int, val label: String)
