@@ -370,6 +370,44 @@ suspend fun radioFor(videoId: String): List<Track> {
         }
     }
 
+    /** Fetches the user's YouTube Music Liked Songs ("VLLM") and Saved Playlists ("FEmusic_liked_playlists"). */
+    suspend fun youtubeLibrary(): Pair<List<Track>, List<YtHomePlaylist>> {
+        val liked = runCatching {
+            val remoteLiked = getYtPlaylistDetail("VLLM", "Liked Songs").tracks
+            if (remoteLiked.isNotEmpty()) remoteLiked else likedTracks.all()
+        }.getOrElse { likedTracks.all() }
+
+        val savedPlaylists = mutableListOf<YtHomePlaylist>()
+        runCatching {
+            val resp = Innertube.client.post("/youtubei/v1/browse") {
+                setBody(BrowseBody(browseId = "FEmusic_liked_playlists"))
+            }.body<BrowseResponse>()
+
+            val tabs = resp.contents?.singleColumnBrowseResultsRenderer?.tabs.orEmpty()
+            val sections = tabs.firstOrNull()
+                ?.tabRenderer?.content
+                ?.sectionListRenderer?.contents
+                .orEmpty()
+
+            for (section in sections) {
+                val gridItems = section.gridRenderer?.items.orEmpty()
+                val shelfItems = section.musicCarouselShelfRenderer?.contents.orEmpty()
+                for (item in (gridItems + shelfItems)) {
+                    val twoRow = item.musicTwoRowItemRenderer ?: continue
+                    val bId = twoRow.navigationEndpoint?.browseEndpoint?.browseId ?: continue
+                    if (bId == "VLLM" || bId == "LM") continue
+                    val title = twoRow.title?.text ?: continue
+                    val subtitle = twoRow.subtitle?.runs?.joinToString("") { it.text.orEmpty() }.orEmpty()
+                    val thumb = twoRow.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
+                    if (savedPlaylists.none { it.browseId == bId }) {
+                        savedPlaylists.add(YtHomePlaylist(bId, title, subtitle, thumb))
+                    }
+                }
+            }
+        }
+        return liked to savedPlaylists
+    }
+
 
     /** Searches YouTube Music specifically for artist channels so users can click into their profile. */
     suspend fun searchArtists(query: String): List<YtHomeArtist> {
