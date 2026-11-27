@@ -191,6 +191,10 @@ suspend fun radioFor(videoId: String): List<Track> {
                         if (twoRow != null) {
                             val browse = twoRow.navigationEndpoint?.browseEndpoint
                             val watch = twoRow.navigationEndpoint?.watchEndpoint
+                            val videoType = watch
+                                ?.watchEndpointMusicSupportedConfigs
+                                ?.watchEndpointMusicConfig
+                                ?.musicVideoType
                             val title = twoRow.title?.text ?: continue
                             val subtitle = twoRow.subtitle?.runs?.joinToString("") { it.text.orEmpty() }.orEmpty()
                             val thumb = twoRow.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
@@ -198,11 +202,35 @@ suspend fun radioFor(videoId: String): List<Track> {
                                 browse?.browseId != null && (browse.browseId.startsWith("VL") || browse.browseId.startsWith("MPRE") || browse.browseId.startsWith("RD")) -> {
                                     playlists.add(YtHomePlaylist(browse.browseId, title, subtitle, thumb))
                                 }
-                                    browse?.browseId != null && browse.browseId.startsWith("UC") -> {
+                                browse?.browseId != null && browse.browseId.startsWith("UC") -> {
                                     artists.add(YtHomeArtist(title, browse.browseId, thumb))
                                 }
+                                watch?.videoId != null && (videoType == null || videoType == "MUSIC_VIDEO_TYPE_ATV") -> {
+                                    val vid = watch.videoId
+                                    val artistName = twoRow.subtitle?.runs?.firstOrNull()?.text ?: "Unknown Artist"
+                                    tracks.add(
+                                        Track(
+                                            id = vid.hashCode().toLong(),
+                                            uri = Uri.parse("youtube://video/$vid"),
+                                            title = title,
+                                            artist = artistName,
+                                            album = "YouTube",
+                                            path = "youtube://video/$vid",
+                                            durationMs = 0L,
+                                            mime = "audio/mpeg",
+                                            bitrate = 0,
+                                            size = 0L,
+                                            trackNumber = 0,
+                                            dateAdded = System.currentTimeMillis(),
+                                            dateModified = System.currentTimeMillis(),
+                                            coverUri = thumb?.let { Uri.parse(it) },
+                                            source = TrackSource.YOUTUBE,
+                                            remoteId = vid,
+                                        )
+                                    )
+                                }
                             }
-                        } // <-- ADD THIS MISSING CLOSING BRACE
+                        }
 
                         val listItem = item.musicResponsiveListItemRenderer
                         if (listItem != null) {
@@ -455,7 +483,8 @@ suspend fun radioFor(videoId: String): List<Track> {
     }
 
     
-    private fun Innertube.SongItem.toTrack(): Track? {
+private fun Innertube.SongItem.toTrack(): Track? {
+        if (!isAudioTrack) return null
         val videoId = info?.endpoint?.videoId ?: return null
         return Track(
             id = videoId.hashCode().toLong(),
