@@ -583,6 +583,42 @@ class PlayerViewModel @Inject constructor(
             DmtAction.DismissDownloadSheet -> {
                 reduce { it.copy(showDownloadSheet = false) }
             }
+is DmtAction.DownloadTracks -> {
+    val targets = intent.tracks.filter { t ->
+        t.source == TrackSource.YOUTUBE && !(t.remoteId ?: t.uri.lastPathSegment).isNullOrBlank()
+    }
+    if (targets.isEmpty()) {
+        notify("no downloadable tracks")
+        return
+    }
+    viewModelScope.launch {
+        for ((i, track) in targets.withIndex()) {
+            val vid = track.remoteId ?: track.uri.lastPathSegment ?: continue
+            _uiState.update {
+                it.copy(
+                    notice = "downloading ${i + 1}/${targets.size}: ${track.title.lowercase()}",
+                    downloadingVideoId = vid,
+                    downloadProgress = 0
+                )
+            }
+            kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+                downloadManager.downloadToDevice(track) { progress ->
+                    _uiState.update { it.copy(downloadProgress = progress.percent) }
+                    if ((progress.isFinished || progress.error != null) && cont.isActive) {
+                        cont.resume(Unit) {}
+                    }
+                }
+            }
+        }
+        _uiState.update {
+            it.copy(
+                downloadingVideoId = null,
+                downloadProgress = -1
+            )
+        }
+        notify("downloaded ${targets.size} tracks from ${intent.label.lowercase()}")
+    }
+}
             is DmtAction.DownloadToDevice -> {
                 val track = intent.track ?: lookupCurrentTrack()
                 if (track == null) { reduce { it.copy(downloadError = "No track playing") }; return@onIntent }
