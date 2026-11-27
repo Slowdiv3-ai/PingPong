@@ -187,6 +187,16 @@ object Innertube {
     ) : Item() {
         override val key get() = info!!.endpoint!!.videoId!!
 
+        val musicVideoType: String?
+            get() = info
+                ?.endpoint
+                ?.watchEndpointMusicSupportedConfigs
+                ?.watchEndpointMusicConfig
+                ?.musicVideoType
+
+        val isAudioTrack: Boolean
+            get() = musicVideoType == null || musicVideoType == "MUSIC_VIDEO_TYPE_ATV"
+
         companion object
     }
 
