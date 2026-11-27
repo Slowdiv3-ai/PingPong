@@ -73,34 +73,123 @@ fun LibraryPane(
 ) {
     val isYouTube = state.settings.sourceMode == SourceMode.YOUTUBE
 
+    if (isYouTube) {
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 10.dp),
+                ) {
+                    TuiTypingText(
+                        text = "> youtube music library",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TuiBright,
+                        charDelayMs = 18L,
+                    )
+                    TuiKey(label = "[ sync ]") { dispatch(DmtAction.RefreshYtHome) }
+                }
+
+                // Liked Songs Folder Card
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, TuiAccent)
+                        .background(TuiRaised)
+                        .tuiClickable {
+                            dispatch(
+                                DmtAction.OpenYtPlaylist(
+                                    browseId = "VLLM",
+                                    title = "liked songs",
+                                    coverUrl = state.ytLikedSongs.firstOrNull()?.coverUri?.toString(),
+                                )
+                            )
+                        }
+                        .padding(12.dp),
+                ) {
+                    Column {
+                        Text(
+                            text = "[ ♥ liked songs ]",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TuiAccent,
+                        )
+                        Text(
+                            text = "${state.ytLikedSongs.size} tracks · ls/library/liked songs",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TuiDim,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    Text(text = "->", style = MaterialTheme.typography.titleMedium, color = TuiAccent)
+                }
+
+                TuiTypingText(
+                    text = "> saved playlists (${state.ytSavedPlaylists.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TuiBright,
+                    charDelayMs = 18L,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                )
+            }
+
+            if (state.ytHomeLoading && state.ytSavedPlaylists.isEmpty()) {
+                item {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                    ) {
+                        PacmanLoader(label = "loading library")
+                    }
+                }
+            } else if (state.ytSavedPlaylists.isEmpty()) {
+                item {
+                    Caption("no saved playlists found — sign in with youtube cookies in sources")
+                }
+            } else {
+                itemsIndexed(state.ytSavedPlaylists, key = { idx, pl -> "${pl.browseId}_$idx" }) { index, pl ->
+                    ListRow(
+                        index = index,
+                        line1 = pl.title,
+                        line2 = pl.subtitle.ifBlank { "youtube playlist" }.lowercase(),
+                        current = false,
+                        onClick = {
+                            dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
+
     Column {
         SearchRow(
             query = state.query,
-            hint = if (isYouTube) {
-                "search youtube music..."
-            } else {
-                pluralStringResource(
-                    R.plurals.search_tracks_hint,
-                    state.tracks.size,
-                    state.tracks.size,
-                )
-            },
+            hint = pluralStringResource(
+                R.plurals.search_tracks_hint,
+                state.tracks.size,
+                state.tracks.size,
+            ),
             shown = state.filtered.size,
             onQuery = { dispatch(DmtAction.Query(it)) },
             onSearch = { dispatch(DmtAction.Search) },
-            sort = if (isYouTube) null else state.settings.librarySort.label,
-            onSort = if (isYouTube) null else {
-                {
-                    dispatch(
-                        DmtAction.Config(
-                            state.settings.copy(
-                                librarySort = state.settings.librarySort.next(
-                                    state.settings.sourceMode,
-                                ),
+            sort = state.settings.librarySort.label,
+            onSort = {
+                dispatch(
+                    DmtAction.Config(
+                        state.settings.copy(
+                            librarySort = state.settings.librarySort.next(
+                                state.settings.sourceMode,
                             ),
                         ),
-                    )
-                }
+                    ),
+                )
             },
         )
 
@@ -437,4 +526,220 @@ private fun SearchArtistCard(
         )
     }
 }
+
+private val SEARCH_GENRES = listOf(
+    "pop" to "#FF5E7E",
+    "hip hop" to "#F59E0B",
+    "afrobeats" to "#10B981",
+    "amapiano" to "#14B8A6",
+    "r&b" to "#8B5CF6",
+    "rock" to "#EF4444",
+    "indie" to "#EC4899",
+    "electronic" to "#06B6D4",
+    "lo-fi" to "#6366F1",
+    "jazz" to "#D97706",
+    "latin" to "#F97316",
+    "chill" to "#3B82F6",
+)
+
+@Composable
+fun SearchPane(
+    state: DmtState,
+    dispatch: (DmtAction) -> Unit,
+    art: suspend (Track) -> Bitmap,
+) {
+    Column {
+        // Linux-style `ls` search prompt with TuiTypingText animation
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, TuiLine)
+                .background(TuiRaised)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            TuiTypingText(
+                text = "ls ~/music/ ",
+                style = MaterialTheme.typography.labelMedium,
+                color = TuiAccent,
+                charDelayMs = 42L,
+            )
+            BasicTextField(
+                value = state.query,
+                onValueChange = { dispatch(DmtAction.Query(it)) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = TuiFg),
+                cursorBrush = SolidColor(TuiAccent),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    if (state.query.isEmpty()) {
+                        Text(
+                            text = "grep -i \"track or artist\"...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TuiFaint,
+                        )
+                    }
+                    inner()
+                },
+            )
+            if (state.query.isNotBlank()) {
+                TuiKey(label = "[ x ]") { dispatch(DmtAction.Query("")) }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            TuiKey(label = "[ run ]") { dispatch(DmtAction.Search) }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Mode A: Active Search Query -> Terminal path results `~music/<genre>/<title> <artist>`
+        if (state.query.isNotBlank()) {
+            if (state.scanning) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                ) {
+                    PacmanLoader(label = "searching '${state.query.lowercase()}'")
+                }
+            } else {
+                if (state.ytSearchedArtists.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
+                    ) {
+                        state.ytSearchedArtists.forEach { artist ->
+                            val bId = artist.browseId ?: return@forEach
+                            SearchArtistCard(
+                                artist = artist,
+                                art = art,
+                                artKey = state.settings.rawArt,
+                            ) {
+                                dispatch(DmtAction.OpenYtArtist(bId, artist.name, artist.coverUrl))
+                            }
+                        }
+                    }
+                }
+
+                LazyColumn {
+                    itemsIndexed(state.filtered, key = { idx, t -> "${t.id}_$idx" }) { index, track ->
+                        val genreSlug = state.ytSearchGenres[track.id] ?: "music"
+                        val filePathLine = "~music/$genreSlug/${track.title.lowercase()} ${track.artist.lowercase()}"
+                        ListRow(
+                            index = index,
+                            line1 = filePathLine,
+                            line2 = "${track.album.lowercase()} · ${track.durationMs.asTime()}",
+                            current = track.id.toString() == state.nowPlayingId,
+                            onClick = { dispatch(DmtAction.PlayAt(state.filtered, index)) },
+                            trailing = { TrackBadges(track) },
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        // Mode B: Selected Genre -> Endless scrollable list of YouTube Music playlists
+        val activeGenre = state.selectedGenre
+        if (activeGenre != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            ) {
+                TuiKey(label = "[ < genres ]") { dispatch(DmtAction.CloseYtGenre) }
+                TuiTypingText(
+                    text = "ls ~/genres/${activeGenre.lowercase()}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TuiAccent,
+                    charDelayMs = 42L,
+                )
+            }
+
+            LazyColumn {
+                itemsIndexed(state.genrePlaylists, key = { idx, pl -> "${pl.browseId}_$idx" }) { index, pl ->
+                    if (index >= state.genrePlaylists.size - 3 && state.genreContinuation != null && !state.genreLoadingMore) {
+                        androidx.compose.runtime.LaunchedEffect(state.genrePlaylists.size) {
+                            dispatch(DmtAction.LoadMoreYtGenre)
+                        }
+                    }
+                    ListRow(
+                        index = index,
+                        line1 = pl.title,
+                        line2 = pl.subtitle.ifBlank { activeGenre }.lowercase(),
+                        current = false,
+                        onClick = {
+                            dispatch(DmtAction.OpenYtPlaylist(pl.browseId, pl.title, pl.coverUrl))
+                        },
+                    )
+                }
+                if (state.genreLoadingMore) {
+                    item {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                        ) {
+                            PacmanLoader(label = "loading more $activeGenre playlists")
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        // Mode C: Default Search Tab -> Spotify-style Grid of Genre Boxes
+        TuiTypingText(
+            text = "> browse genres",
+            style = MaterialTheme.typography.titleMedium,
+            color = TuiBright,
+            charDelayMs = 42L,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val rows = SEARCH_GENRES.chunked(2)
+            itemsIndexed(rows) { _, pair ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    pair.forEach { (genre, _) ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(68.dp)
+                                .border(1.dp, TuiLine)
+                                .background(TuiRaised)
+                                .tuiClickable { dispatch(DmtAction.OpenYtGenre(genre)) }
+                                .padding(12.dp),
+                        ) {
+                            Column(modifier = Modifier.align(Alignment.BottomStart)) {
+                                Text(
+                                    text = "# $genre",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TuiBright,
+                                )
+                                Text(
+                                    text = "playlists ->",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TuiAccent,
+                                )
+                            }
+                        }
+                    }
+                    if (pair.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
 
