@@ -1054,14 +1054,14 @@ class PlayerViewModel @Inject constructor(
                 reduce {
                     it.copy(
                         selectedGenre = intent.genre,
-                        genrePlaylists = emptyList(),
+                        genrePlaylists = emptyList<dev.abhi.zmt.data.repository.YtHomePlaylist>(),
                         genreContinuation = null,
                         genreLoadingMore = true,
                     )
                 }
                 viewModelScope.launch {
                     val (items, nextToken) = withContext(Dispatchers.IO) {
-                        youtubeRepository.genrePlaylists(intent.genre, null)
+                        youtubeRepository.genrePlaylists(intent.genre, 0)
                     }
                     reduce {
                         it.copy(
@@ -1079,7 +1079,7 @@ class PlayerViewModel @Inject constructor(
                 reduce { it.copy(genreLoadingMore = true) }
                 viewModelScope.launch {
                     val (more, nextToken) = withContext(Dispatchers.IO) {
-                        youtubeRepository.genrePlaylists(genre, token)
+                        youtubeRepository.genrePlaylists(genre, token.toIntOrNull() ?: 1)
                     }
                     reduce {
                         it.copy(
