@@ -346,7 +346,21 @@ suspend fun radioFor(videoId: String): List<Track> {
         return try {
             val normalizedId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
             val page = Innertube.playlistPage(BrowseBody(browseId = normalizedId))?.getOrNull()
-            val rawTracks = page?.songsPage?.items?.mapNotNull { it.toTrack() }.orEmpty()
+            val collected = mutableListOf<Track>()
+            page?.songsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+            var nextToken = page?.songsPage?.continuation
+            var pagesFetched = 0
+            while (nextToken != null && pagesFetched < 4) {
+                val contPage = Innertube.playlistPage(ContinuationBody(continuation = nextToken))?.getOrNull()
+                contPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+                nextToken = contPage?.continuation
+                pagesFetched++
+            }
+            if (collected.isEmpty()) {
+                val fallbackId = normalizedId.removePrefix("VL")
+                Innertube.nextPage(NextBody(playlistId = fallbackId))?.getOrNull()?.itemsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+            }
+            val rawTracks = collected.distinctBy { it.remoteId }
             val title = page?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
             val subtitle = page?.description?.takeIf { it.isNotBlank() }
                 ?: "${rawTracks.size} tracks"
