@@ -594,23 +594,23 @@ is DmtAction.DownloadTracks -> {
     viewModelScope.launch {
         for ((i, track) in targets.withIndex()) {
             val vid = track.remoteId ?: track.uri.lastPathSegment ?: continue
-            _uiState.update {
+            reduce {
                 it.copy(
                     notice = "downloading ${i + 1}/${targets.size}: ${track.title.lowercase()}",
                     downloadingVideoId = vid,
                     downloadProgress = 0
                 )
             }
-            kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
-                downloadManager.downloadToDevice(track) { progress ->
-                    _uiState.update { it.copy(downloadProgress = progress.percent) }
-                    if ((progress.isFinished || progress.error != null) && cont.isActive) {
-                        cont.resume(Unit) {}
-                    }
+            val done = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            downloadManager.downloadToDevice(track) { progress ->
+                reduce { it.copy(downloadProgress = progress.percent) }
+                if (progress.isFinished || progress.error != null) {
+                    done.complete(true)
                 }
             }
+            done.await()
         }
-        _uiState.update {
+        reduce {
             it.copy(
                 downloadingVideoId = null,
                 downloadProgress = -1
