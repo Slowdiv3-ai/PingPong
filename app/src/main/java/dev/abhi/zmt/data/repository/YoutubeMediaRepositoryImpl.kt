@@ -367,10 +367,12 @@ suspend fun radioFor(videoId: String): List<Track> {
                 ?: "${rawTracks.size} tracks"
             val cover = page?.thumbnail?.url ?: fallbackCover ?: rawTracks.firstOrNull()?.coverUri?.toString()
             val coverUriParsed = cover?.let { Uri.parse(it) }
-            val tracks = if (coverUriParsed != null) {
-                rawTracks.map { t -> if (t.coverUri == null) t.copy(coverUri = coverUriParsed) else t }
-            } else {
-                rawTracks
+            val pageAuthor = page?.authors?.firstOrNull()?.name
+            val tracks = rawTracks.map { t ->
+                t.copy(
+                    coverUri = t.coverUri ?: coverUriParsed,
+                    artist = if (t.artist == "Unknown Artist" && !pageAuthor.isNullOrBlank()) pageAuthor else t.artist
+                )
             }
             YtPlaylistDetail(
                 browseId = browseId,
