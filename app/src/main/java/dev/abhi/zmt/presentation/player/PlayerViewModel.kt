@@ -602,7 +602,7 @@ is DmtAction.DownloadTracks -> {
                 )
             }
             val done = kotlinx.coroutines.CompletableDeferred<Boolean>()
-            downloadManager.downloadToDevice(track) { progress ->
+            downloadManager.downloadToDevice(context = context, videoId = vid, title = track.title, artist = track.artist, onProgress = { progress ->
                 reduce { it.copy(downloadProgress = progress.percent) }
                 if (progress.isFinished || progress.error != null) {
                     done.complete(true)
