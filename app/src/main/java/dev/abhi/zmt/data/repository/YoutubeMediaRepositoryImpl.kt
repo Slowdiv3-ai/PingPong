@@ -390,9 +390,8 @@ suspend fun radioFor(videoId: String): List<Track> {
                 .orEmpty()
 
             for (section in sections) {
-                val gridItems = section.gridRenderer?.items.orEmpty()
                 val shelfItems = section.musicCarouselShelfRenderer?.contents.orEmpty()
-                for (item in (gridItems + shelfItems)) {
+                for (item in shelfItems) {
                     val twoRow = item.musicTwoRowItemRenderer ?: continue
                     val bId = twoRow.navigationEndpoint?.browseEndpoint?.browseId ?: continue
                     if (bId == "VLLM" || bId == "LM") continue
