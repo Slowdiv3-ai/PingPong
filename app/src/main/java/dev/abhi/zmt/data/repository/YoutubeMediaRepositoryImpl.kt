@@ -359,7 +359,7 @@ suspend fun radioFor(videoId: String): List<Track> {
             }
             if (collected.isEmpty()) {
                 val fallbackId = normalizedId.removePrefix("VL")
-                Innertube.nextPage(NextBody(playlistId = fallbackId))?.getOrNull()?.itemsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+                Innertube.nextPage(NextBody(videoId = "", playlistId = fallbackId))?.getOrNull()?.itemsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
             }
             val rawTracks = collected.distinctBy { it.remoteId }
             val title = page?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
