@@ -407,6 +407,40 @@ suspend fun radioFor(videoId: String): List<Track> {
         return liked to savedPlaylists
     }
 
+    /** Fetches official & community YouTube Music playlists for a genre (supports endless pagination via continuation). */
+    suspend fun genrePlaylists(genre: String, continuation: String? = null): Pair<List<YtHomePlaylist>, String?> {
+        return try {
+            val page = if (continuation != null) {
+                Innertube.searchPage(
+                    body = ContinuationBody(continuation = continuation),
+                    fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
+                )?.getOrNull()
+            } else {
+                Innertube.searchPage(
+                    body = SearchBody(
+                        query = "$genre music playlist",
+                        params = Innertube.SearchFilter.CommunityPlaylist.value,
+                    ),
+                    fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from,
+                )?.getOrNull()
+            }
+            val list = page?.items?.mapNotNull { pl ->
+                val bId = pl.info?.endpoint?.browseId ?: return@mapNotNull null
+                val name = pl.info.name ?: return@mapNotNull null
+                YtHomePlaylist(
+                    browseId = bId,
+                    title = name,
+                    subtitle = pl.channel?.name ?: genre,
+                    coverUrl = pl.thumbnail?.url,
+                )
+            }.orEmpty()
+            list to page?.continuation
+        } catch (e: Exception) {
+            Log.e(TAG, "genrePlaylists failed for '$genre': ${e.message}")
+            emptyList<YtHomePlaylist>() to null
+        }
+    }
+
 
     /** Searches YouTube Music specifically for artist channels so users can click into their profile. */
     suspend fun searchArtists(query: String): List<YtHomeArtist> {
