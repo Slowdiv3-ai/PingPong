@@ -67,6 +67,7 @@ import dev.abhi.zmt.presentation.library.ArtistsPane
 import dev.abhi.zmt.presentation.library.FoldersPane
 import dev.abhi.zmt.presentation.library.GenresPane
 import dev.abhi.zmt.presentation.library.LibraryPane
+import dev.abhi.zmt.presentation.library.SearchPane
 import dev.abhi.zmt.presentation.library.PlaylistsPane
 import dev.abhi.zmt.presentation.library.ImportedPane
 import dev.abhi.zmt.presentation.player.ChainContent
@@ -209,19 +210,34 @@ fun DmtScreen(
             ) {
                 Titlebar(state, dispatch)
                 TabsRow(state, dispatch)
-                val routeSlug = when (state.view) {
-                    DmtView.HOME -> "home"
-                    DmtView.LIBRARY -> if (state.settings.sourceMode == SourceMode.YOUTUBE) "yt/search" else "local/library"
-                    DmtView.PLAYLISTS -> "playlists"
-                    DmtView.IMPORTED -> "imported"
-                    DmtView.SOURCES -> "sources"
-                    DmtView.SETTINGS -> "config"
-                    DmtView.YT_PLAYLIST -> "yt/playlist"
-                    DmtView.YT_ARTIST -> "yt/artist"
-                    else -> state.view.name.lowercase()
+                val breadcrumbCmd = when (state.view) {
+                    DmtView.HOME -> "cd /home"
+                    DmtView.SEARCH -> state.selectedGenre?.let { "ls/genres/${it.lowercase()}" } ?: "cd /search"
+                    DmtView.LIBRARY -> "cd /library"
+                    DmtView.PLAYLISTS -> state.openPlaylist?.let { "ls/library/${it.lowercase()}" } ?: "cd /playlists"
+                    DmtView.IMPORTED -> "cd /imported"
+                    DmtView.SOURCES -> "cd /sources"
+                    DmtView.SETTINGS -> "cd /config"
+                    DmtView.YT_ARTIST -> {
+                        val artistName = state.ytArtistDetail?.name?.lowercase() ?: "artist"
+                        "ls/music/$artistName"
+                    }
+                    DmtView.YT_PLAYLIST -> {
+                        val detail = state.ytPlaylistDetail
+                        val plTitle = detail?.title?.lowercase() ?: "playlist"
+                        if (state.ytPreviousView == DmtView.LIBRARY) {
+                            "ls/library/$plTitle"
+                        } else {
+                            val artistName = detail?.tracks?.firstOrNull()?.artist?.lowercase()
+                                ?: state.ytArtistDetail?.name?.lowercase()
+                                ?: "youtube"
+                            "ls/music/$artistName/$plTitle"
+                        }
+                    }
+                    else -> "cd /${state.view.name.lowercase()}"
                 }
                 TuiTypingText(
-                    text = "pingpong@arch:~$ cd /$routeSlug",
+                    text = "pingpong@arch:~$ $breadcrumbCmd",
                     style = MaterialTheme.typography.labelSmall,
                     color = TuiDim,
                     charDelayMs = 42L,
@@ -428,6 +444,7 @@ private fun PaneHost(
                 state.view == DmtView.FOLDERS -> FoldersPane(state, dispatch)
                 state.view == DmtView.PLAYLISTS -> PlaylistsPane(state, dispatch)
                 state.view == DmtView.IMPORTED -> ImportedPane(state, dispatch)
+                state.view == DmtView.SEARCH -> SearchPane(state, dispatch, art)
                 state.view == DmtView.YT_PLAYLIST -> YtPlaylistDetailPane(state, dispatch, art)
                 state.view == DmtView.YT_ARTIST -> YtArtistDetailPane(state, dispatch, art)
                 else -> LibraryPane(state, dispatch, art)
@@ -548,6 +565,7 @@ private fun Titlebar(state: DmtState, dispatch: (DmtAction) -> Unit) {
 private fun libraryTabs(state: DmtState): List<Pair<String, DmtView>> =
     buildList {
         add(stringResource(R.string.tab_home) to DmtView.HOME)
+        add("search" to DmtView.SEARCH)
         add(stringResource(R.string.tab_library) to DmtView.LIBRARY)
         add(stringResource(R.string.tab_albums) to DmtView.ALBUMS)
         add(stringResource(R.string.tab_artists) to DmtView.ARTISTS)
