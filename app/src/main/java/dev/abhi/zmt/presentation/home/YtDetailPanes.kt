@@ -161,6 +161,14 @@ fun YtPlaylistDetailPane(
                                 dispatch(DmtAction.PlayAt(detail.tracks.shuffled(), 0))
                             }
                         }
+                        TuiKey(
+                            label = if (state.downloadingVideoId != null) "[ dl ${state.downloadProgress.coerceAtLeast(0)}% ]" else "[ download ]",
+                            onClick = {
+                                if (detail.tracks.isNotEmpty() && state.downloadingVideoId == null) {
+                                    dispatch(DmtAction.DownloadTracks(detail.tracks, detail.title))
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -187,6 +195,7 @@ fun YtPlaylistDetailPane(
                     current = track.id.toString() == state.nowPlayingId,
                     onClick = { dispatch(DmtAction.PlayAt(detail.tracks, index)) },
                     trailing = { TrackBadges(track) },
+                    onLongClick = { dispatch(DmtAction.DownloadToDevice(track)) }
                 )
             }
         }
