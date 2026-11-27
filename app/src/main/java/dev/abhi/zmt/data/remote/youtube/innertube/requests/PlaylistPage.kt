@@ -36,8 +36,9 @@ suspend fun Innertube.playlistPage(body: BrowseBody) = runCatchingCancellable {
             ?.contents
 
         val musicShelfRenderer = contents
-            ?.firstOrNull()
-            ?.musicShelfRenderer
+            ?.firstNotNullOfOrNull { 
+                it.musicShelfRenderer 
+            }
 
         val musicCarouselShelfRenderer = contents
             ?.getOrNull(1)
@@ -102,8 +103,9 @@ suspend fun Innertube.playlistPage(body: BrowseBody) = runCatchingCancellable {
             ?.contents
 
         val musicShelfRenderer = contents
-            ?.firstOrNull()
-            ?.musicShelfRenderer
+            ?.firstNotNullOfOrNull { 
+                it.musicShelfRenderer 
+            }
 
         val musicCarouselShelfRenderer = contents
             ?.getOrNull(1)
