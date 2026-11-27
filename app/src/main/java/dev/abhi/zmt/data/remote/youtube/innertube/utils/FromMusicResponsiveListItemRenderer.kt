@@ -15,9 +15,11 @@ fun Innertube.SongItem.Companion.from(renderer: MusicResponsiveListItemRenderer)
             ?.runs
             ?.getOrNull(0)
             ?.let {
-                if (it.navigationEndpoint?.endpoint is NavigationEndpoint.Endpoint.Watch) Innertube.Info(
+                val watchEndpoint = (it.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch)
+                    ?: (renderer.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch)
+                if (watchEndpoint != null) Innertube.Info(
                     name = it.text,
-                    endpoint = it.navigationEndpoint.endpoint as NavigationEndpoint.Endpoint.Watch
+                    endpoint = watchEndpoint
                 ) else null
             },
         // This inspection is not true
