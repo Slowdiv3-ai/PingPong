@@ -607,7 +607,7 @@ is DmtAction.DownloadTracks -> {
                 if (progress.isFinished || progress.error != null) {
                     done.complete(true)
                 }
-            }
+            })
             done.await()
         }
         reduce {
