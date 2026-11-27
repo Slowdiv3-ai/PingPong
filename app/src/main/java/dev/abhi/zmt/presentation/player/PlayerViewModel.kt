@@ -213,6 +213,7 @@ class PlayerViewModel @Inject constructor(
         try {
             val results = youtubeRepository.search(query)
             val artists = youtubeRepository.searchArtists(query)
+            val genreMap = results.associate { t -> t.id to inferGenreSlug(query, t) }
             indexTracks(results)
             if (currentState.query == query) {
                 reduce {
@@ -221,6 +222,7 @@ class PlayerViewModel @Inject constructor(
                         tracks = results,
                         filtered = results,
                         ytSearchedArtists = artists,
+                        ytSearchGenres = genreMap,
                     )
                 }
             }
@@ -234,6 +236,16 @@ class PlayerViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun inferGenreSlug(query: String, track: Track): String {
+        val text = "${query} ${track.title} ${track.artist} ${track.album}".lowercase()
+        val knownGenres = listOf(
+            "afrobeats", "amapiano", "hip hop", "rap", "r&b", "pop", "rock",
+            "indie", "electronic", "edm", "lo-fi", "jazz", "classical",
+            "latin", "reggaeton", "country", "metal", "soul", "chill"
+        )
+        return knownGenres.firstOrNull { text.contains(it) }?.replace(" ", "-") ?: "music"
     }
 
     private suspend fun performLocalFilter(query: String) {
@@ -671,7 +683,7 @@ class PlayerViewModel @Inject constructor(
                 val selected = intent.list.getOrNull(intent.index)
                 if (selected != null &&
                     selected.source == TrackSource.YOUTUBE &&
-                    currentState.view == DmtView.LIBRARY &&
+                    (currentState.view == DmtView.SEARCH || currentState.view == DmtView.LIBRARY) &&
                     currentState.query.isNotBlank()
                 ) {
                     indexTracks(listOf(selected))
@@ -1038,6 +1050,56 @@ class PlayerViewModel @Inject constructor(
                 reduce { it.copy(notice = intent.message) }
             }
             is DmtAction.RefreshYtHome -> loadYoutubeHome()
+            is DmtAction.OpenYtGenre -> {
+                reduce {
+                    it.copy(
+                        selectedGenre = intent.genre,
+                        genrePlaylists = emptyList(),
+                        genreContinuation = null,
+                        genreLoadingMore = true,
+                    )
+                }
+                viewModelScope.launch {
+                    val (items, nextToken) = withContext(Dispatchers.IO) {
+                        youtubeRepository.genrePlaylists(intent.genre, null)
+                    }
+                    reduce {
+                        it.copy(
+                            genrePlaylists = items,
+                            genreContinuation = nextToken,
+                            genreLoadingMore = false,
+                        )
+                    }
+                }
+            }
+            is DmtAction.LoadMoreYtGenre -> {
+                val genre = currentState.selectedGenre ?: return@onIntent
+                val token = currentState.genreContinuation ?: return@onIntent
+                if (currentState.genreLoadingMore) return@onIntent
+                reduce { it.copy(genreLoadingMore = true) }
+                viewModelScope.launch {
+                    val (more, nextToken) = withContext(Dispatchers.IO) {
+                        youtubeRepository.genrePlaylists(genre, token)
+                    }
+                    reduce {
+                        it.copy(
+                            genrePlaylists = (it.genrePlaylists + more).distinctBy { p -> p.browseId },
+                            genreContinuation = nextToken,
+                            genreLoadingMore = false,
+                        )
+                    }
+                }
+            }
+            is DmtAction.CloseYtGenre -> {
+                reduce {
+                    it.copy(
+                        selectedGenre = null,
+                        genrePlaylists = emptyList(),
+                        genreContinuation = null,
+                        genreLoadingMore = false,
+                    )
+                }
+            }
             is DmtAction.PlayYtPlaylist -> {
                 notify("loading ${intent.title.lowercase()}...")
                 viewModelScope.launch {
@@ -1249,7 +1311,15 @@ class PlayerViewModel @Inject constructor(
         reduce { it.copy(ytHomeLoading = true) }
         viewModelScope.launch {
             val feed = withContext(Dispatchers.IO) { youtubeRepository.homeFeed() }
-            reduce { it.copy(ytHome = feed, ytHomeLoading = false) }
+            val (liked, saved) = withContext(Dispatchers.IO) { youtubeRepository.youtubeLibrary() }
+            reduce {
+                it.copy(
+                    ytHome = feed,
+                    ytLikedSongs = liked,
+                    ytSavedPlaylists = saved,
+                    ytHomeLoading = false,
+                )
+            }
         }
     }
 
