@@ -327,16 +327,9 @@ suspend fun radioFor(videoId: String): List<Track> {
     }
 
     /** Loads all playable tracks inside a YouTube Music playlist or album browseId. */
-    suspend fun playlistTracks(browseId: String): List<Track> {
-        return try {
-            val normalizedId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
-            val page = Innertube.playlistPage(BrowseBody(browseId = normalizedId))?.getOrNull()
-            page?.songsPage?.items?.mapNotNull { it.toTrack() }.orEmpty()
-        } catch (e: Exception) {
-            Log.e(TAG, "playlistTracks failed for '$browseId': ${e.message}")
-            emptyList()
-        }
-    }
+suspend fun playlistTracks(browseId: String): List<Track> {
+    return getYtPlaylistDetail(browseId, "").tracks
+}
 
         /** Loads full playlist/album/radio details (title, cover, and tracks) for browsing. */
     suspend fun getYtPlaylistDetail(
