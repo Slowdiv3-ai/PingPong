@@ -170,6 +170,7 @@ sealed interface DmtAction {
     data object DismissUploadSheet : DmtAction
     data object UploadToTelegram : DmtAction
     data class DownloadToDevice(val track: Track? = null) : DmtAction
+    data class DownloadTracks(val tracks: List<Track>, val label: String) : DmtAction
     data object ToggleLike : DmtAction
     data class PlayNext(val index: Int) : DmtAction
     data class RestoreQueueItem(val index: Int) : DmtAction
