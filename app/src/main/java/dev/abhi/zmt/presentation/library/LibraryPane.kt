@@ -152,7 +152,7 @@ fun LibraryPane(
                     Caption("no saved playlists found — sign in with youtube cookies in sources")
                 }
             } else {
-                itemsIndexed(state.ytSavedPlaylists, key = { idx, pl -> "${pl.browseId}_$idx" }) { index, pl ->
+                itemsIndexed(state.ytSavedPlaylists, key = { idx: Int, pl: dev.abhi.zmt.data.repository.YtHomePlaylist -> "${pl.browseId}_$idx" }) { index, pl ->
                     ListRow(
                         index = index,
                         line1 = pl.title,
@@ -662,7 +662,7 @@ fun SearchPane(
             }
 
             LazyColumn {
-                itemsIndexed(state.genrePlaylists, key = { idx, pl -> "${pl.browseId}_$idx" }) { index, pl ->
+                itemsIndexed(state.genrePlaylists, key = { idx: Int, pl: dev.abhi.zmt.data.repository.YtHomePlaylist -> "${pl.browseId}_$idx" }) { index, pl ->
                     if (index >= state.genrePlaylists.size - 3 && state.genreContinuation != null && !state.genreLoadingMore) {
                         androidx.compose.runtime.LaunchedEffect(state.genrePlaylists.size) {
                             dispatch(DmtAction.LoadMoreYtGenre)
