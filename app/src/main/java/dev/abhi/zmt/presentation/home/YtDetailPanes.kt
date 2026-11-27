@@ -85,8 +85,17 @@ fun YtPlaylistDetailPane(
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
+            val pathHeader = if (state.ytPreviousView == DmtView.LIBRARY) {
+                "ls/library/${detail.title.lowercase()}"
+            } else {
+                val artistSlug = detail.tracks.firstOrNull()?.artist?.lowercase()
+                    ?: state.ytArtistDetail?.name?.lowercase()
+                    ?: "youtube"
+                "ls/music/$artistSlug/${detail.title.lowercase()}"
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp, bottom = 12.dp),
@@ -94,8 +103,14 @@ fun YtPlaylistDetailPane(
                 TuiKey(label = "[ < back ]") {
                     dispatch(DmtAction.Show(state.ytPreviousView))
                 }
+                TuiTypingText(
+                    text = pathHeader,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TuiAccent,
+                    charDelayMs = 42L,
+                    maxLines = 1,
+                )
             }
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -213,13 +228,21 @@ fun YtArtistDetailPane(
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp, bottom = 12.dp),
             ) {
                 TuiKey(label = "[ < back ]") {
-                    dispatch(DmtAction.Show(DmtView.HOME))
+                    dispatch(DmtAction.Show(state.ytPreviousView))
                 }
+                TuiTypingText(
+                    text = "ls/music/${artist.name.lowercase()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TuiAccent,
+                    charDelayMs = 42L,
+                    maxLines = 1,
+                )
             }
 
             Row(
