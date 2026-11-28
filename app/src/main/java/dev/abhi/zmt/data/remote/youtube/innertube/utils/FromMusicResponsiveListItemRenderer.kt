@@ -17,11 +17,14 @@ fun Innertube.SongItem.Companion.from(renderer: MusicResponsiveListItemRenderer)
             ?.let {
                 val watchEndpoint = (it.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch)
                     ?: (renderer.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch)
+                    ?: (renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch)
+                    ?: renderer.playlistItemData?.videoId?.let { vid -> NavigationEndpoint.Endpoint.Watch(videoId = vid) }
                 if (watchEndpoint != null) Innertube.Info(
                     name = it.text,
                     endpoint = watchEndpoint
                 ) else null
             },
+
         // This inspection is not true
         authors = @Suppress("FilterIsInstanceResultIsAlwaysEmpty") renderer
             .flexColumns
