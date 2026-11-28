@@ -69,8 +69,9 @@ class TrackDownloadManager @Inject constructor(
             mainProgress(DownloadProgress())
             Log.i(TAG, "Starting download for $videoId")
 
-            // 1. Resolve stream URL via yt-dlp (runs on IO)
-           val resolved = resolver.resolve(videoId, preferHighQuality = true) 
+             // 1. Resolve stream URL via yt-dlp (runs on IO)
+            val resolved = resolver.resolve(videoId, preferHighQuality = true)
+                ?: resolver.resolve(videoId, preferHighQuality = false)
             if (resolved == null) {
                 mainProgress(DownloadProgress(error = "Could not resolve stream URL"))
                 return@launch
