@@ -11,7 +11,9 @@ data class MusicResponsiveListItemRenderer(
     val flexColumns: List<FlexColumn>,
     val thumbnail: ThumbnailRenderer?,
     val navigationEndpoint: NavigationEndpoint?,
-    val badges: List<Badge>?
+    val badges: List<Badge>?,
+    val playlistItemData: PlaylistItemData? = null,
+    val overlay: Overlay? = null,
 ) {
     @Serializable
     data class FlexColumn(
@@ -23,4 +25,11 @@ data class MusicResponsiveListItemRenderer(
             val text: Runs?
         )
     }
+
+    @Serializable data class PlaylistItemData(val videoId: String? = null)
+    @Serializable data class Overlay(val musicItemThumbnailOverlayRenderer: MusicItemThumbnailOverlayRenderer? = null)
+    @Serializable data class MusicItemThumbnailOverlayRenderer(val content: Content? = null)
+    @Serializable data class Content(val musicPlayButtonRenderer: MusicPlayButtonRenderer? = null)
+    @Serializable data class MusicPlayButtonRenderer(val playNavigationEndpoint: NavigationEndpoint? = null)
 }
+
