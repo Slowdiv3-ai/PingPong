@@ -77,33 +77,38 @@ class YoutubeStreamResolver @Inject constructor(
         urlCache.remove(videoId)
     }
 
-    suspend fun resolveViaInnertubeFast(videoId: String): ResolvedStream? {
+        suspend fun resolveViaInnertubeFast(
+        videoId: String,
+        preferHighQuality: Boolean = false
+    ): ResolvedStream? {
         for (context in INNERTUBE_CONTEXTS) {
             if (!currentCoroutineContext().isActive) return null
-            val stream = resolveViaInnertubeContext(videoId, context)
+            val stream = resolveViaInnertubeContext(videoId, context, preferHighQuality)
             if (stream != null) return stream
         }
         return null
     }
 
-    suspend fun resolve(videoId: String): ResolvedStream? {
-        getCachedStream(videoId)?.let { return it }
+        suspend fun resolve(videoId: String, preferHighQuality: Boolean = false): ResolvedStream? {
+        if (!preferHighQuality) {
+            getCachedStream(videoId)?.let { return it }
+        }
 
         // 1. Fast native Innertube (~0.3s)
-        resolveViaInnertubeFast(videoId)?.let {
-            cacheStream(videoId, it)
+        resolveViaInnertubeFast(videoId, preferHighQuality)?.let {
+            if (!preferHighQuality) cacheStream(videoId, it)
             return it
         }
 
         // 2. Fast Piped fallback
         resolveViaPiped(videoId)?.let {
-            cacheStream(videoId, it)
+            if (!preferHighQuality) cacheStream(videoId, it)
             return it
         }
 
         // 3. Slow yt-dlp last resort (3-5s)
         resolveViaYtDlp(videoId)?.let {
-            cacheStream(videoId, it)
+            if (!preferHighQuality) cacheStream(videoId, it)
             return it
         }
 
@@ -255,9 +260,10 @@ class YoutubeStreamResolver @Inject constructor(
         }
     }
 
-    private suspend fun resolveViaInnertubeContext(
+        private suspend fun resolveViaInnertubeContext(
         videoId: String,
         context: Context,
+        preferHighQuality: Boolean = false,
     ): ResolvedStream? {
         val label = context.client.clientName
         return try {
@@ -271,12 +277,19 @@ class YoutubeStreamResolver @Inject constructor(
             val progressive = streamingData.formats.orEmpty()
 
             val audioFormats = adaptive.filter { it.mimeType.startsWith("audio/") }
-            val format = audioFormats.find { it.url != null && it.itag == 140 }
-                ?: audioFormats.find { it.url != null && it.itag == 251 }
-                ?: audioFormats.find { it.url != null }
-                ?: progressive.find { it.url != null && it.itag == 18 }
-                ?: progressive.find { it.url != null }
-                ?: return null
+            val format = if (preferHighQuality) {
+                audioFormats.filter { it.url != null && it.mimeType.contains("mp4") }.maxByOrNull { it.bitrate ?: 0 }
+                    ?: audioFormats.filter { it.url != null }.maxByOrNull { it.bitrate ?: 0 }
+                    ?: progressive.find { it.url != null }
+                    ?: return null
+            } else {
+                audioFormats.find { it.url != null && it.itag == 140 }
+                    ?: audioFormats.find { it.url != null && it.itag == 251 }
+                    ?: audioFormats.find { it.url != null }
+                    ?: progressive.find { it.url != null && it.itag == 18 }
+                    ?: progressive.find { it.url != null }
+                    ?: return null
+            }
             val url = format.url
             if (url == null) {
                 Log.d(TAG, "Innertube($label): format has signatureCipher only, skipping")
