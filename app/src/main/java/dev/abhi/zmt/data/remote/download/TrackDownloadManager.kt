@@ -57,6 +57,8 @@ class TrackDownloadManager @Inject constructor(
         videoId: String,
         title: String,
         artist: String,
+        album: String = "",
+        lyricsText: String? = null,
         onProgress: (DownloadProgress) -> Unit,
     ) {
         // Dispatch progress updates to Main thread for UI safety
@@ -68,7 +70,7 @@ class TrackDownloadManager @Inject constructor(
             Log.i(TAG, "Starting download for $videoId")
 
             // 1. Resolve stream URL via yt-dlp (runs on IO)
-            val resolved = resolver.resolve(videoId)
+           val resolved = resolver.resolve(videoId, preferHighQuality = true) 
             if (resolved == null) {
                 mainProgress(DownloadProgress(error = "Could not resolve stream URL"))
                 return@launch
@@ -119,69 +121,87 @@ class TrackDownloadManager @Inject constructor(
             val fileName = "${title} - ${artist}.${extension}"
                 .replace(Regex("[/\\\\:*?\"<>|]"), "_")
 
-            // 4. Create MediaStore entry
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
-                put(MediaStore.Audio.Media.TITLE, title)
-                put(MediaStore.Audio.Media.ARTIST, artist)
-                put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
-                put(MediaStore.Audio.Media.IS_PENDING, 1)
+// 4. Download stream to temporary cache file first
+val tempFile = java.io.File(context.cacheDir, "dl_${System.currentTimeMillis()}.$extension")
+try {
+    val totalBytes = body.contentLength()
+    var bytesReadTotal = 0L
+    body.byteStream().use { input ->
+        tempFile.outputStream().use { output ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                output.write(buffer, 0, bytesRead)
+                bytesReadTotal += bytesRead
+                if (totalBytes > 0) {
+                    val pct = ((bytesReadTotal * 100) / totalBytes).toInt().coerceIn(0, 99)
+                    mainProgress(DownloadProgress(percent = pct)) // (match your existing DownloadProgress constructor)
+                }
             }
+        }
+    }
 
-            val resolver_ = context.contentResolver
-            val collectionUri = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val itemUri = resolver_.insert(collectionUri, contentValues)
+    // 5. Write MP4/OGG metadata tags directly into tempFile
+    val tagMap = buildMap {
+        put("TITLE", title)
+        if (artist.isNotBlank() && artist != "Unknown Artist") {
+            put("ARTIST", artist)
+            put("ALBUMARTIST", artist)
+        }
+        if (album.isNotBlank()) put("ALBUM", album)
+        if (!lyricsText.isNullOrBlank()) put("LYRICS", lyricsText)
+    }
+    dev.jyotiraditya.metadata.AudioTags.write(tempFile, context.cacheDir, tagMap)
 
-            if (itemUri == null) {
-                mainProgress(DownloadProgress(error = "Failed to create MediaStore entry"))
-                return@launch
+    // 6. Save tagged audio file into MediaStore.Audio.Media
+    val resolver_ = context.contentResolver
+    val values = android.content.ContentValues().apply {
+        put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+        put(android.provider.MediaStore.Audio.Media.MIME_TYPE, mimeType)
+        put(android.provider.MediaStore.Audio.Media.TITLE, title)
+        put(android.provider.MediaStore.Audio.Media.ARTIST, artist)
+        if (album.isNotBlank()) put(android.provider.MediaStore.Audio.Media.ALBUM, album)
+        put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MUSIC)
+        put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+    }
+
+    val collection = android.provider.MediaStore.Audio.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    val itemUri = resolver_.insert(collection, values) ?: throw IllegalStateException("Failed to create MediaStore entry")
+
+    resolver_.openOutputStream(itemUri)?.use { out ->
+        tempFile.inputStream().use { inp -> inp.copyTo(out) }
+    }
+
+    values.clear()
+    values.put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+    resolver_.update(itemUri, values, null, null)
+
+    // 7. Save matching .lrc sidecar file if lyrics exist
+    if (!lyricsText.isNullOrBlank()) {
+        val lrcName = "${title} - ${artist}.lrc".replace(Regex("[/\\\\:*?\"<>|]"), "_")
+        val lrcValues = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME, lrcName)
+            put(android.provider.MediaStore.Files.FileColumns.MIME_TYPE, "text/plain")
+            put(android.provider.MediaStore.Files.FileColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_MUSIC)
+            put(android.provider.MediaStore.Files.FileColumns.IS_PENDING, 1)
+        }
+        val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+        resolver_.insert(filesUri, lrcValues)?.let { lrcUri ->
+            resolver_.openOutputStream(lrcUri)?.use { out ->
+                out.write(lyricsText.toByteArray(Charsets.UTF_8))
             }
+            lrcValues.clear()
+            lrcValues.put(android.provider.MediaStore.Files.FileColumns.IS_PENDING, 0)
+            resolver_.update(lrcUri, lrcValues, null, null)
+        }
+    }
 
-            try {
-                resolver_.openOutputStream(itemUri)?.let { outputStream ->
-                    val inputStream = body.byteStream()
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var totalRead = 0L
-                    var bytesRead: Int
+    Log.i(TAG, "Saved to Music: $fileName")
+} finally {
+    tempFile.delete()
+}
 
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        outputStream.write(buffer, 0, bytesRead)
-                        outputStream.flush()
-                        totalRead += bytesRead
-
-                        // Report progress every chunk
-                        if (totalLen > 0) {
-                            mainProgress(DownloadProgress(
-                                bytesDownloaded = totalRead,
-                                totalBytes = totalLen,
-                            ))
-                        } else {
-                            // Send periodic heartbeats for chunked (unknown-length) streams
-                            if (totalRead % (BUFFER_SIZE * 128L) == 0L) {
-                                mainProgress(DownloadProgress(
-                                    bytesDownloaded = totalRead,
-                                    totalBytes = -1,
-                                ))
-                            }
-                        }
-                    }
-
-                    outputStream.flush()
-                    inputStream.close()
-                } ?: throw Exception("Could not open output stream")
-
-                // Clear pending flag
-                contentValues.clear()
-                contentValues.put(MediaStore.Audio.Media.IS_PENDING, 0)
-                resolver_.update(itemUri, contentValues, null, null)
-
-                mainProgress(DownloadProgress(
-                    bytesDownloaded = totalLen.coerceAtLeast(0),
-                    totalBytes = totalLen.coerceAtLeast(0),
-                    isFinished = true,
-                ))
-                Log.i(TAG, "Saved to Music: $fileName")
+            
             } catch (e: Exception) {
                 Log.e(TAG, "Download failed: ${e.message}", e)
                 try { resolver_.delete(itemUri, null, null) } catch (_: Exception) {}
