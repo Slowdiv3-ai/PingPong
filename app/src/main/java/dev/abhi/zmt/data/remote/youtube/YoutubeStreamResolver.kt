@@ -278,8 +278,10 @@ class YoutubeStreamResolver @Inject constructor(
 
             val audioFormats = adaptive.filter { it.mimeType.startsWith("audio/") }
             val format = if (preferHighQuality) {
-                audioFormats.filter { it.url != null && it.mimeType.contains("mp4") }.maxByOrNull { it.bitrate ?: 0 }
-                    ?: audioFormats.filter { it.url != null }.maxByOrNull { it.bitrate ?: 0 }
+                audioFormats.filter { it.url != null && it.mimeType.contains("mp4") && it.itag != 141 }.maxByOrNull { it.bitrate ?: 0 }
+                    ?: audioFormats.filter { it.url != null && it.itag != 141 }.maxByOrNull { it.bitrate ?: 0 }
+                    ?: audioFormats.find { it.url != null && it.itag == 140 }
+                    ?: audioFormats.find { it.url != null && it.itag == 251 }
                     ?: progressive.find { it.url != null }
                     ?: return null
             } else {
