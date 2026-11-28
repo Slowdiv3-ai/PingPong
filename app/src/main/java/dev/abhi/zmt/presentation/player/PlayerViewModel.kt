@@ -601,9 +601,17 @@ is DmtAction.DownloadTracks -> {
                     downloadProgress = 0
                 )
             }
+                        val fetchedLyrics = runCatching { getLyrics.onlineText(track) }.getOrNull()
             val done = kotlinx.coroutines.CompletableDeferred<Boolean>()
-            downloadManager.downloadToDevice(context = context, videoId = vid, title = track.title, artist = track.artist, onProgress = { progress ->
-                reduce { it.copy(downloadProgress = progress.percent) }
+            downloadManager.downloadToDevice(
+                context = context,
+                videoId = vid,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                lyricsText = fetchedLyrics,
+                onProgress = { progress ->
+            reduce { it.copy(downloadProgress = progress.percent) }
                 if (progress.isFinished || progress.error != null) {
                     done.complete(true)
                 }
@@ -626,47 +634,51 @@ is DmtAction.DownloadTracks -> {
                     reduce { it.copy(downloadError = "No video ID") }; return@onIntent
                 }
                 reduce { it.copy(showDownloadSheet = false, downloadingVideoId = videoId, downloadProgress = 0, downloadError = null) }
-                // Download runs on TrackDownloadManager's own IO scope — NOT viewModelScope
-                downloadManager.downloadToDevice(
-                    context = context,
-                    videoId = videoId,
-                    title = track.title,
-                    artist = track.artist,
-                    onProgress = { progress ->
-                        if (progress.isFinished) {
-                            reduce {
-                                it.copy(
-                                    downloadingVideoId = null,
-                                    downloadProgress = 101,
-                                    downloadError = null,
-                                )
+                viewModelScope.launch {
+                    val fetchedLyrics = runCatching { getLyrics.onlineText(track) }.getOrNull()
+                    downloadManager.downloadToDevice(
+                        context = context,
+                        videoId = videoId,
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        lyricsText = fetchedLyrics,
+                        onProgress = { progress ->
+                            if (progress.isFinished) {
+                                reduce {
+                                    it.copy(
+                                        downloadingVideoId = null,
+                                        downloadProgress = 101,
+                                        downloadError = null,
+                                    )
+                                }
+                                viewModelScope.launch {
+                                    kotlinx.coroutines.delay(2000L)
+                                    reduce { it.copy(downloadingVideoId = null, downloadProgress = -1, downloadError = null) }
+                                }
+                            } else if (progress.error != null) {
+                                reduce {
+                                    it.copy(
+                                        downloadingVideoId = null,
+                                        downloadProgress = -2,
+                                        downloadError = progress.error,
+                                    )
+                                }
+                                viewModelScope.launch {
+                                    kotlinx.coroutines.delay(2000L)
+                                    reduce { it.copy(downloadProgress = -1, downloadError = null) }
+                                }
+                            } else {
+                                reduce {
+                                    it.copy(
+                                        downloadProgress = progress.percent.coerceIn(0, 99),
+                                        downloadError = null,
+                                    )
+                                }
                             }
-                            viewModelScope.launch {
-                                kotlinx.coroutines.delay(2000L)
-                                reduce { it.copy(downloadingVideoId = null, downloadProgress = -1, downloadError = null) }
-                            }
-                        } else if (progress.error != null) {
-                            reduce {
-                                it.copy(
-                                    downloadingVideoId = null,
-                                    downloadProgress = -2,
-                                    downloadError = progress.error,
-                                )
-                            }
-                            viewModelScope.launch {
-                                kotlinx.coroutines.delay(2000L)
-                                reduce { it.copy(downloadProgress = -1, downloadError = null) }
-                            }
-                        } else {
-                            reduce {
-                                it.copy(
-                                    downloadProgress = progress.percent.coerceIn(0, 99),
-                                    downloadError = null,
-                                )
-                            }
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
             is DmtAction.Show -> {
                 reduce { it.copy(view = intent.view, error = null) }
