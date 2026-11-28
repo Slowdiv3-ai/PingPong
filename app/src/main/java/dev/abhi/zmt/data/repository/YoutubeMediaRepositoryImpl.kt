@@ -19,6 +19,7 @@ import dev.abhi.zmt.domain.repository.MediaRepository
 import io.ktor.client.call.body
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -341,19 +342,24 @@ suspend fun playlistTracks(browseId: String): List<Track> {
             val normalizedId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
             val page = Innertube.playlistPage(BrowseBody(browseId = normalizedId))?.getOrNull()
             val collected = mutableListOf<Track>()
-            page?.songsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+            page?.songsPage?.items?.mapNotNull { it.toTrack(allowAllTypes = true)
+ }?.let { collected.addAll(it) }
             var nextToken = page?.songsPage?.continuation
             var pagesFetched = 0
             while (nextToken != null && pagesFetched < 4) {
                 val contPage = Innertube.playlistPage(ContinuationBody(continuation = nextToken))?.getOrNull()
-                contPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+                contPage?.items?.mapNotNull {it.toTrack(allowAllTypes = true)
+                }
+                ?.let { collected.addAll(it) }
                 nextToken = contPage?.continuation
                 pagesFetched++
             }
             if (collected.isEmpty()) {
-                val fallbackId = normalizedId.removePrefix("VL")
-                Innertube.nextPage(NextBody(videoId = "", playlistId = fallbackId))?.getOrNull()?.itemsPage?.items?.mapNotNull { it.toTrack() }?.let { collected.addAll(it) }
+                val raw = Innertube.client.post("/youtubei/v1/browse") { setBody(BrowseBody(browseId = normalizedId)) }.bodyAsText()
+                val foundPlId = Regex("\"playlistId\"\\s*:\\s*\"((?:OLAK|PL|RD)[A-Za-z0-9_-]+)\"").find(raw)?.groupValues?.getOrNull(1) ?: normalizedId.removePrefix("VL")
+                Innertube.nextPage(NextBody(videoId = "", playlistId = foundPlId))?.getOrNull()?.itemsPage?.items?.mapNotNull { it.toTrack(allowAllTypes = true) }?.let { collected.addAll(it) }
             }
+
             val rawTracks = collected.distinctBy { it.remoteId }
             val title = page?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
             val subtitle = page?.description?.takeIf { it.isNotBlank() }
@@ -556,9 +562,9 @@ suspend fun playlistTracks(browseId: String): List<Track> {
         }
     }
 
-    
-private fun Innertube.SongItem.toTrack(): Track? {
-        if (!isAudioTrack) return null
+
+    private fun Innertube.SongItem.toTrack(allowAllTypes: Boolean = false): Track? {
+    if (!allowAllTypes && !isAudioTrack) return null
         val videoId = info?.endpoint?.videoId ?: return null
         return Track(
             id = videoId.hashCode().toLong(),
