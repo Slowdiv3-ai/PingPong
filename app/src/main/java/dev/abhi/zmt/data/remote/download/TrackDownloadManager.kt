@@ -134,8 +134,7 @@ try {
                 output.write(buffer, 0, bytesRead)
                 bytesReadTotal += bytesRead
                 if (totalBytes > 0) {
-                    val pct = ((bytesReadTotal * 100) / totalBytes).toInt().coerceIn(0, 99)
-                    mainProgress(DownloadProgress(percent = pct)) // (match your existing DownloadProgress constructor)
+                    mainProgress(DownloadProgress(bytesDownloaded = bytesReadTotal, totalBytes = totalBytes))
                 }
             }
         }
@@ -195,18 +194,15 @@ try {
             resolver_.update(lrcUri, lrcValues, null, null)
         }
     }
-
     Log.i(TAG, "Saved to Music: $fileName")
+    mainProgress(DownloadProgress(bytesDownloaded = totalBytes.coerceAtLeast(0), totalBytes = totalBytes.coerceAtLeast(0), isFinished = true))
+} catch (e: Exception) {
+    Log.e(TAG, "Download failed: ${e.message}", e)
+    mainProgress(DownloadProgress(error = "Download failed: ${e.message}"))
 } finally {
     tempFile.delete()
 }
 
-            
-            } catch (e: Exception) {
-                Log.e(TAG, "Download failed: ${e.message}", e)
-                try { resolver_.delete(itemUri, null, null) } catch (_: Exception) {}
-                mainProgress(DownloadProgress(error = "Download failed: ${e.message}"))
-            }
         }
     }
 
